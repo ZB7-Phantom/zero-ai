@@ -10,6 +10,9 @@ import { logger } from './config/logger';
 import { requestLogger } from './middleware/requestLogger';
 import { globalLimiter } from './middleware/rateLimiter';
 import { errorHandler } from './middleware/errorHandler';
+import authRouter from './modules/auth/router';
+import clinicRouter from './modules/clinic/router';
+import staffRouter from './modules/staff/router';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -40,8 +43,9 @@ app.get('/', (_req, res) => {
   res.json({ status: 'Zero API running', version: '1.0.0', env: env.NODE_ENV });
 });
 
-// Routes registered here in subsequent directives
-// app.use('/api/auth', authRouter);
+app.use('/api/auth', authRouter);
+app.use('/api/clinic', clinicRouter);
+app.use('/api/staff', staffRouter);
 
 app.use(errorHandler); // Must be last
 
