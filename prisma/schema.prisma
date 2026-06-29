@@ -1,0 +1,277 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role { 
+  ADMIN 
+  PHYSICIAN 
+  STAFF 
+}
+enum PatientStatus { 
+  WAITING 
+  WITH_DOCTOR 
+  COMPLETED 
+  NO_SHOW 
+  CANCELLED 
+}
+enum PatientType { 
+  WALK_IN 
+  APPOINTMENT 
+  ON_MY_WAY 
+}
+enum AppointmentStatus { 
+  PENDING 
+  CONFIRMED 
+  COMPLETED 
+  CANCELLED 
+  NO_SHOW 
+}
+enum ConversationStatus { 
+  AI_HANDLING 
+  NEEDS_REVIEW 
+  STAFF_TOOK_OVER 
+  RESOLVED 
+}
+enum EscalationReason { 
+  URGENT_MEDICAL 
+  BILLING_DISPUTE 
+  PATIENT_ANGRY 
+  OUT_OF_SCOPE 
+  MANUAL 
+}
+enum RecallStatus { 
+  UP_TO_DATE 
+  DUE_SOON 
+  OVERDUE 
+}
+enum PlanTier { 
+  STARTER 
+  NAVIGATOR 
+  ENTERPRISE 
+}
+enum WhatsAppStatus { 
+  NOT_CONNECTED 
+  VERIFICATION_PENDING 
+  CONNECTED 
+  SANDBOX 
+}
+
+// One row per clinic. The root of all multi-tenancy.
+// Every other table references this via clinicId.
+model Clinic {
+  id       String @id @default(uuid())
+  name     String
+  address  String?
+  services String[]
+  openDays Int[]
+  opensAt  String @default("09:00")
+  closesAt String @default("17:00")
+
+  whatsappStatus   WhatsAppStatus @default(NOT_CONNECTED)
+  phoneNumberId    String? @unique
+  phoneNumber      String?
+  metaAccessToken  String?
+
+  plan              PlanTier  @default(STARTER)
+  planExpiresAt     DateTime?
+  paystackCustomerId String?
+
+  escalationAlerts  Boolean @default(true)
+  recallReminders   Boolean @default(true)
+  noShowAlerts      Boolean @default(true)
+  dailySummaryEmail Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  staffMembers  StaffMember[]
+  patients      Patient[]
+  appointments  Appointment[]
+  conversations Conversation[]
+  queueEntries  QueueEntry[]
+  notifications Notification[]
+
+  @@index([phoneNumberId])
+}
+
+model StaffMember {
+  id           String  @id @default(uuid())
+  clinicId     String
+  clinic       Clinic  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  fullName     String
+  email        String
+  passwordHash String
+  role         Role    @default(STAFF)
+  whatsappNumber String?
+  isActive     Boolean @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  replies ConversationMessage[]
+
+  @@unique([clinicId, email])
+  @@index([clinicId])
+  @@index([email])
+}
+
+model Patient {
+  id       String @id @default(uuid())
+  clinicId String
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  phone      String
+  name       String?
+  age        Int?
+  gender     String?
+  complaint  String?
+  symptoms   String?
+  department String?
+  urgency    String?
+
+  patientType  PatientType   @default(WALK_IN)
+  status       PatientStatus @default(WAITING)
+  queueNumber  Int?
+  arrivalTime  DateTime?
+  calledInAt   DateTime?
+  completedAt  DateTime?
+
+  lastVisitAt       DateTime?
+  nextAppointmentAt DateTime?
+  recallStatus      RecallStatus @default(UP_TO_DATE)
+  recallSentAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  appointments  Appointment[]
+  conversations Conversation[]
+
+  @@unique([clinicId, phone])
+  @@index([clinicId])
+  @@index([phone])
+  @@index([clinicId, status])
+  @@index([recallStatus])
+}
+
+model Appointment {
+  id       String @id @default(uuid())
+  clinicId String
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  patientId    String?
+  patient      Patient? @relation(fields: [patientId], references: [id])
+  patientName  String?
+  patientPhone String?
+
+  scheduledAt       DateTime
+  service           String?
+  doctorName        String?
+  notes             String?
+  status            AppointmentStatus @default(PENDING)
+  reminder24hSentAt DateTime?
+  reminder1hSentAt  DateTime?
+  bookedVia         String @default("whatsapp")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clinicId])
+  @@index([clinicId, scheduledAt])
+  @@index([clinicId, status])
+  @@index([patientPhone])
+}
+
+// One row per clinic per day — tracks the incrementing queue counter
+model QueueEntry {
+  id       String   @id @default(uuid())
+  clinicId String
+  clinic   Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  date     DateTime @db.Date
+  lastNumber Int    @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clinicId, date])
+  @@index([clinicId, date])
+}
+
+model Conversation {
+  id       String @id @default(uuid())
+  clinicId String
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  patientId    String?
+  patient      Patient? @relation(fields: [patientId], references: [id])
+  patientPhone String
+  patientName  String?
+
+  status           ConversationStatus @default(AI_HANDLING)
+  escalationReason EscalationReason?
+  isAiPaused       Boolean @default(false)
+
+  // Current AI flow state and collected intake data — stored as JSON
+  // so we don't need separate columns for every possible field
+  aiState Json @default("{}")
+
+  messageCount       Int @default(0)
+  lastMessageAt      DateTime?
+  lastMessagePreview String?
+  resolvedAt         DateTime?
+  resolvedById       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages ConversationMessage[]
+
+  @@index([clinicId])
+  @@index([clinicId, status])
+  @@index([patientPhone])
+  @@index([clinicId, lastMessageAt])
+}
+
+model ConversationMessage {
+  id             String @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  role          String  // "patient" | "ai" | "staff"
+  staffMemberId String?
+  staffMember   StaffMember? @relation(fields: [staffMemberId], references: [id])
+  content       String
+  mediaUrl      String?
+  mediaType     String?
+
+  // Meta's message ID — used to deduplicate webhook deliveries
+  // (Meta sometimes delivers the same message twice)
+  metaMessageId String? @unique
+
+  sentAt DateTime @default(now())
+
+  @@index([conversationId])
+}
+
+model Notification {
+  id       String @id @default(uuid())
+  clinicId String
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  type     String
+  title    String
+  body     String
+  metadata Json    @default("{}")
+  isRead   Boolean @default(false)
+  readAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([clinicId, isRead])
+  @@index([clinicId, createdAt])
+}

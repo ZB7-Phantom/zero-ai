@@ -1,0 +1,58 @@
+import express from 'express';
+import http from 'http';
+import cors from 'cors';
+import helmet from 'helmet';
+import compression from 'compression';
+import { Server as SocketIOServer } from 'socket.io';
+import { env } from './config/env';
+import { prisma } from './config/database';
+import { logger } from './config/logger';
+import { requestLogger } from './middleware/requestLogger';
+import { globalLimiter } from './middleware/rateLimiter';
+import { errorHandler } from './middleware/errorHandler';
+
+const app = express();
+const server = http.createServer(app);
+
+// Socket.io — each clinic joins a room by clinicId so events never cross tenants
+export const io = new SocketIOServer(server, {
+  cors: { origin: env.FRONTEND_URL, methods: ['GET', 'POST'] },
+});
+
+io.on('connection', (socket) => {
+  socket.on('join:clinic', (clinicId: string) => socket.join(`clinic:${clinicId}`));
+});
+
+app.use(helmet());
+app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
+app.use(compression());
+
+// Raw body preserved on every request — Meta webhook HMAC verification requires it
+app.use(express.json({
+  verify: (req: express.Request & { rawBody?: Buffer }, _res, buf) => { req.rawBody = buf; },
+}));
+app.use(express.urlencoded({ extended: true }));
+app.use(requestLogger);
+app.use(globalLimiter);
+
+app.get('/', (_req, res) => {
+  res.json({ status: 'Zero API running', version: '1.0.0', env: env.NODE_ENV });
+});
+
+// Routes registered here in subsequent directives
+// app.use('/api/auth', authRouter);
+
+app.use(errorHandler); // Must be last
+
+async function start() {
+  await prisma.$connect();
+  logger.info('Database connected');
+  server.listen(parseInt(env.PORT), () => logger.info(`Zero API on port ${env.PORT}`));
+}
+
+process.on('SIGTERM', async () => { await prisma.$disconnect(); process.exit(0); });
+process.on('SIGINT',  async () => { await prisma.$disconnect(); process.exit(0); });
+
+start().catch((err) => { logger.error('Startup failed', { err }); process.exit(1); });
+
+export { app, server };
