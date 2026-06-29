@@ -12,6 +12,7 @@ import { globalLimiter } from './middleware/rateLimiter';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 // Socket.io — each clinic joins a room by clinicId so events never cross tenants

@@ -6,7 +6,12 @@ const make = (windowMs: number, max: number, message: string, prefix: string) =>
     windowMs, max,
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req) => `${prefix}:${req.ip}`,
+    validate: { ip: false },
+    keyGenerator: (req) => {
+      const ip = (req.ip || req.socket.remoteAddress || 'unknown')
+        .replace(/^::ffff:/, ''); // strip IPv6-mapped IPv4 prefix
+      return `${prefix}:${ip}`;
+    },
     handler: (req, res) => {
       logger.warn('Rate limit hit', { ip: req.ip, path: req.path });
       res.status(429).json({ error: message, code: 'RATE_LIMITED' });
