@@ -17,6 +17,7 @@ import webhookRouter from './modules/webhook/router';
 import queueRouter from './modules/queue/router';
 import patientsRouter from './modules/patients/router';
 import appointmentsRouter from './modules/appointments/router';
+import conversationsRouter from './modules/conversations/router';
 import { scheduleMidnightReset } from './services/scheduler/queueReset';
 import { scheduleReminders } from './services/scheduler/appointmentReminders';
 const app = express();
@@ -54,6 +55,7 @@ app.use('/api/staff', staffRouter);
 app.use('/api/queue', queueRouter);
 app.use('/api/patients', patientsRouter);
 app.use('/api/appointments', appointmentsRouter);
+app.use('/api/conversations', conversationsRouter);
 app.use('/webhook', webhookRouter);
 
 app.use(errorHandler); // Must be last
