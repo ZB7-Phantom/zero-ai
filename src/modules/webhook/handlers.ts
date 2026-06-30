@@ -8,6 +8,7 @@ import { processMessage } from '../../services/zero-ai/brain';
 import { AiConversationState } from '../../types';
 import { EscalationReason } from '@prisma/client';
 import { assignQueueNumber } from '../queue/handlers';
+import { bookAppointmentFromWhatsApp } from '../appointments/handlers';
 
 // Meta calls GET /webhook/whatsapp to verify the endpoint.
 // We confirm by echoing back the hub.challenge value.
@@ -200,6 +201,25 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
                 arrivalTime: new Date(),
               },
             });
+
+            // If this was an appointment booking, create the Appointment record
+            if (updatedData.mode === 'appointment' && updatedData.appointmentDate && updatedData.appointmentTime) {
+              const scheduledAt = new Date(`${updatedData.appointmentDate} ${updatedData.appointmentTime}`);
+              if (!isNaN(scheduledAt.getTime())) {
+                await bookAppointmentFromWhatsApp(
+                  clinic.id,
+                  patientPhone,
+                  updatedData.name,
+                  scheduledAt,
+                  updatedData.complaint
+                );
+              } else {
+                logger.warn('Could not parse appointment date/time', {
+                  date: updatedData.appointmentDate,
+                  time: updatedData.appointmentTime,
+                });
+              }
+            }
           }
 
           // Send reply to patient via WhatsApp

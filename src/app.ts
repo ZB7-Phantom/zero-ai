@@ -16,7 +16,9 @@ import staffRouter from './modules/staff/router';
 import webhookRouter from './modules/webhook/router';
 import queueRouter from './modules/queue/router';
 import patientsRouter from './modules/patients/router';
+import appointmentsRouter from './modules/appointments/router';
 import { scheduleMidnightReset } from './services/scheduler/queueReset';
+import { scheduleReminders } from './services/scheduler/appointmentReminders';
 const app = express();
 app.set('trust proxy', 1);
 const server = http.createServer(app);
@@ -51,6 +53,7 @@ app.use('/api/clinic', clinicRouter);
 app.use('/api/staff', staffRouter);
 app.use('/api/queue', queueRouter);
 app.use('/api/patients', patientsRouter);
+app.use('/api/appointments', appointmentsRouter);
 app.use('/webhook', webhookRouter);
 
 app.use(errorHandler); // Must be last
@@ -59,6 +62,7 @@ async function start() {
   await prisma.$connect();
   logger.info('Database connected');
   await scheduleMidnightReset();
+  await scheduleReminders();
   logger.info('Scheduler ready');
   server.listen(parseInt(env.PORT), () => logger.info(`Zero API on port ${env.PORT}`));
 }
