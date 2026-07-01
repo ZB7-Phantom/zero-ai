@@ -72,6 +72,7 @@ async function start() {
   await scheduleReminders();
   await scheduleNoShowDetector();
   logger.info('Scheduler ready');
+  logger.info(`Binding to port: ${env.PORT} (from env: ${process.env.PORT})`);
   server.listen(parseInt(env.PORT), () => logger.info(`Zero API on port ${env.PORT}`));
 }
 
