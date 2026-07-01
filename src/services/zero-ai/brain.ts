@@ -25,7 +25,7 @@ export async function processMessage(
   state: AiConversationState,
   clinic: Clinic
 ): Promise<BrainResult> {
-  logger.info('Gemini key check', { keyLength: env.GEMINI_API_KEY?.length, keyPrefix: env.GEMINI_API_KEY?.slice(0, 6) });
+  logger.info(`Gemini key check — length: ${env.GEMINI_API_KEY?.length}, prefix: ${env.GEMINI_API_KEY?.slice(0, 6)}`);
 
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.0-flash',
