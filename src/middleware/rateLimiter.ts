@@ -6,7 +6,7 @@ const make = (windowMs: number, max: number, message: string, prefix: string) =>
     windowMs, max,
     standardHeaders: true,
     legacyHeaders: false,
-    validate: { ip: false },
+    validate: false,
     keyGenerator: (req) => {
       const ip = (req.ip || req.socket.remoteAddress || 'unknown')
         .replace(/^::ffff:/, ''); // strip IPv6-mapped IPv4 prefix

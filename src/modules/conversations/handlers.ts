@@ -82,7 +82,17 @@ export async function getConversation(
     });
 
     if (!conversation) throw new AppError(404, 'Conversation not found', 'NOT_FOUND');
-    res.json(conversation);
+
+    const messages = conversation.messages.filter((m: any) => m.role !== 'system');
+    const systemEvents = conversation.messages
+      .filter((m: any) => m.role === 'system')
+      .map((m: any) => ({
+        type: m.content.includes('taken over') ? 'takeover' : 'resolved',
+        actor: m.content,
+        timestamp: m.sentAt,
+      }));
+
+    res.json({ ...conversation, messages, systemEvents });
   } catch (err) {
     next(err);
   }
@@ -104,6 +114,14 @@ export async function takeOver(
     const updated = await prisma.conversation.update({
       where: { id: conversation.id },
       data: { isAiPaused: true, status: 'STAFF_TOOK_OVER' },
+    });
+
+    await prisma.conversationMessage.create({
+      data: {
+        conversationId: conversation.id,
+        role: 'system',
+        content: `Conversation taken over by ${req.staff.fullName}`,
+      },
     });
 
     io.to(`clinic:${req.clinic.id}`).emit('conversation:updated', {
@@ -201,6 +219,14 @@ export async function resolve(
         resolvedAt: new Date(),
         resolvedById: req.staff.id,
         isAiPaused: false, // Resolving hands control back to Zero for any future message
+      },
+    });
+
+    await prisma.conversationMessage.create({
+      data: {
+        conversationId: conversation.id,
+        role: 'system',
+        content: `Conversation resolved by ${req.staff.fullName}`,
       },
     });
 

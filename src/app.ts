@@ -19,6 +19,7 @@ import patientsRouter from './modules/patients/router';
 import appointmentsRouter from './modules/appointments/router';
 import conversationsRouter from './modules/conversations/router';
 import notificationsRouter from './modules/notifications/router';
+import analyticsRouter from './modules/analytics/router';
 import { scheduleMidnightReset } from './services/scheduler/queueReset';
 import { scheduleReminders } from './services/scheduler/appointmentReminders';
 import { scheduleNoShowDetector } from './services/scheduler/noShowDetector';
@@ -59,6 +60,7 @@ app.use('/api/patients', patientsRouter);
 app.use('/api/appointments', appointmentsRouter);
 app.use('/api/conversations', conversationsRouter);
 app.use('/api/notifications', notificationsRouter);
+app.use('/api/analytics', analyticsRouter);
 app.use('/webhook', webhookRouter);
 
 app.use(errorHandler); // Must be last

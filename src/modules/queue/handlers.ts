@@ -5,6 +5,21 @@ import { AppError } from '../../middleware/errorHandler';
 import { AuthenticatedRequest } from '../../types';
 import { io } from '../../app';
 
+function formatQueuePatient(p: any) {
+  return {
+    id: p.id,
+    patientId: p.id,
+    patientName: p.name,
+    phone: p.phone,
+    queueNumber: p.queueNumber,
+    arrivalTime: p.arrivalTime,
+    doctor: null, // Assigned at appointment level, not queue level
+    reason: p.complaint,
+    status: p.status.toLowerCase(),
+    source: p.patientType === 'WALK_IN' ? 'walk-in' : 'zero',
+  };
+}
+
 // Gets today's queue for the clinic.
 // Returns patients grouped by status for the Live Queue tabs.
 export async function getLiveQueue(
@@ -42,10 +57,10 @@ export async function getLiveQueue(
 
     // Group by status for the dashboard tabs
     const grouped = {
-      waiting: patients.filter((p) => p.status === 'WAITING'),
-      withDoctor: patients.filter((p) => p.status === 'WITH_DOCTOR'),
-      completed: patients.filter((p) => p.status === 'COMPLETED'),
-      noShow: patients.filter((p) => p.status === 'NO_SHOW'),
+      waiting: patients.filter((p) => p.status === 'WAITING').map(formatQueuePatient),
+      withDoctor: patients.filter((p) => p.status === 'WITH_DOCTOR').map(formatQueuePatient),
+      completed: patients.filter((p) => p.status === 'COMPLETED').map(formatQueuePatient),
+      noShow: patients.filter((p) => p.status === 'NO_SHOW').map(formatQueuePatient),
       total: patients.length,
     };
 
@@ -131,7 +146,7 @@ export async function updatePatientStatus(
       to: status,
     });
 
-    res.json(updated);
+    res.json(formatQueuePatient(updated));
   } catch (err) {
     next(err);
   }
@@ -175,7 +190,7 @@ export async function addWalkIn(
 
     io.to(`clinic:${req.clinic.id}`).emit('queue:patient-added', { patient });
 
-    res.status(201).json(patient);
+    res.status(201).json(formatQueuePatient(patient));
   } catch (err) {
     next(err);
   }

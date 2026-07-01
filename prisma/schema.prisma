@@ -109,6 +109,7 @@ model StaffMember {
   passwordHash String
   role         Role    @default(STAFF)
   whatsappNumber String?
+  specialization String?
   isActive     Boolean @default(true)
   lastLoginAt  DateTime?
   createdAt    DateTime @default(now())

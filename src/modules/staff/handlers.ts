@@ -11,7 +11,7 @@ export async function listStaff(req: AuthenticatedRequest, res: Response, next: 
   try {
     const staff = await prisma.staffMember.findMany({
       where: { clinicId: req.clinic.id, isActive: true },
-      select: { id: true, fullName: true, email: true, role: true, whatsappNumber: true, lastLoginAt: true },
+      select: { id: true, fullName: true, email: true, role: true, specialization: true, whatsappNumber: true, lastLoginAt: true },
       orderBy: { createdAt: 'asc' },
     });
     res.json(staff);
@@ -28,9 +28,19 @@ export async function addStaff(req: AuthenticatedRequest, res: Response, next: N
     if (existing) throw new AppError(409, 'Email already used in this clinic', 'EMAIL_TAKEN');
 
     const passwordHash = await bcrypt.hash(TEMP_PASSWORD, 12);
+    const specialization = data.specialization ?? data.roleOrSpecialization;
+
     const staff = await prisma.staffMember.create({
-      data: { ...data, clinicId: req.clinic.id, passwordHash },
-      select: { id: true, fullName: true, email: true, role: true, whatsappNumber: true },
+      data: { 
+        fullName: data.fullName,
+        email: data.email,
+        role: data.role,
+        whatsappNumber: data.whatsappNumber,
+        specialization, 
+        clinicId: req.clinic.id, 
+        passwordHash 
+      },
+      select: { id: true, fullName: true, email: true, role: true, specialization: true, whatsappNumber: true, lastLoginAt: true },
     });
 
     res.status(201).json(staff);

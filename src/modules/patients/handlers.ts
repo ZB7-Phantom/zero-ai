@@ -74,7 +74,26 @@ export async function getPatient(
     });
 
     if (!patient) throw new AppError(404, 'Patient not found', 'NOT_FOUND');
-    res.json(patient);
+
+    const intakeNotes = {
+      reportedSymptoms: patient.symptoms || '',
+      structuredAnswers: [
+        patient.complaint && { question: 'What brings you in today?', answer: patient.complaint },
+        patient.symptoms && { question: 'Can you describe your symptoms?', answer: patient.symptoms },
+        patient.urgency && { question: 'Urgency level', answer: patient.urgency },
+      ].filter(Boolean),
+    };
+
+    const history = patient.appointments
+      .filter((a: any) => a.status === 'COMPLETED')
+      .map((a: any) => ({
+        date: new Date(a.scheduledAt).toISOString().split('T')[0],
+        doctor: a.doctorName || 'Unknown',
+        reason: a.service || 'General',
+        notes: a.notes || '',
+      }));
+
+    res.json({ ...patient, intakeNotes, history });
   } catch (err) {
     next(err);
   }

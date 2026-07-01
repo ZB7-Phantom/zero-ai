@@ -5,6 +5,23 @@ import { AppError } from '../../middleware/errorHandler';
 import { AuthenticatedRequest } from '../../types';
 import { io } from '../../app';
 
+function formatAppointment(a: any) {
+  return {
+    id: a.id,
+    patientId: a.patientId,
+    patientName: a.patientName,
+    patientPhone: a.patientPhone,
+    doctor: a.doctorName,
+    date: new Date(a.scheduledAt).toISOString().split('T')[0],
+    time: new Date(a.scheduledAt).toTimeString().slice(0, 5),
+    visitType: a.service,
+    status: a.status.toLowerCase(),
+    bookedVia: a.bookedVia === 'whatsapp' ? 'zero' : 'manual',
+    createdAt: a.createdAt,
+    updatedAt: a.updatedAt,
+  };
+}
+
 // GET /api/appointments?from=2026-06-22&to=2026-06-28
 // Returns appointments in a date range for the calendar view.
 // Defaults to the current week if no range given.
@@ -26,7 +43,7 @@ export async function listAppointments(
       orderBy: { scheduledAt: 'asc' },
     });
 
-    res.json(appointments);
+    res.json(appointments.map(formatAppointment));
   } catch (err) {
     next(err);
   }
@@ -102,7 +119,7 @@ export async function createAppointment(
 
     io.to(`clinic:${req.clinic.id}`).emit('appointment:created', { appointment });
 
-    res.status(201).json(appointment);
+    res.status(201).json(formatAppointment(appointment));
   } catch (err) {
     next(err);
   }
@@ -146,7 +163,7 @@ export async function updateAppointment(
 
     logger.info('Appointment updated', { clinicId: req.clinic.id, appointmentId: id, status });
 
-    res.json(updated);
+    res.json(formatAppointment(updated));
   } catch (err) {
     next(err);
   }

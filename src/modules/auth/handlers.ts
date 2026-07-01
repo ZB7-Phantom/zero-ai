@@ -64,6 +64,16 @@ export async function login(req: Request, res: Response, next: NextFunction) {
       { expiresIn: env.JWT_EXPIRES_IN as any }
     );
 
-    res.json({ token, staff: { id: staff.id, fullName: staff.fullName, email: staff.email, role: staff.role }, clinic: { id: staff.clinic.id, name: staff.clinic.name } });
+    const staffCount = await prisma.staffMember.count({
+      where: { clinicId: staff.clinicId, isActive: true },
+    });
+
+    const onboardingComplete = !!(
+      staff.clinic.address &&
+      staff.clinic.services.length > 0 &&
+      staffCount > 1
+    );
+
+    res.json({ token, staff: { id: staff.id, fullName: staff.fullName, email: staff.email, role: staff.role }, clinic: { id: staff.clinic.id, name: staff.clinic.name }, onboardingComplete });
   } catch (err) { next(err); }
 }
