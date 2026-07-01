@@ -18,8 +18,10 @@ import queueRouter from './modules/queue/router';
 import patientsRouter from './modules/patients/router';
 import appointmentsRouter from './modules/appointments/router';
 import conversationsRouter from './modules/conversations/router';
+import notificationsRouter from './modules/notifications/router';
 import { scheduleMidnightReset } from './services/scheduler/queueReset';
 import { scheduleReminders } from './services/scheduler/appointmentReminders';
+import { scheduleNoShowDetector } from './services/scheduler/noShowDetector';
 const app = express();
 app.set('trust proxy', 1);
 const server = http.createServer(app);
@@ -56,6 +58,7 @@ app.use('/api/queue', queueRouter);
 app.use('/api/patients', patientsRouter);
 app.use('/api/appointments', appointmentsRouter);
 app.use('/api/conversations', conversationsRouter);
+app.use('/api/notifications', notificationsRouter);
 app.use('/webhook', webhookRouter);
 
 app.use(errorHandler); // Must be last
@@ -65,6 +68,7 @@ async function start() {
   logger.info('Database connected');
   await scheduleMidnightReset();
   await scheduleReminders();
+  await scheduleNoShowDetector();
   logger.info('Scheduler ready');
   server.listen(parseInt(env.PORT), () => logger.info(`Zero API on port ${env.PORT}`));
 }

@@ -9,6 +9,7 @@ import { AiConversationState } from '../../types';
 import { EscalationReason } from '@prisma/client';
 import { assignQueueNumber } from '../queue/handlers';
 import { bookAppointmentFromWhatsApp } from '../appointments/handlers';
+import { createNotification } from '../../services/notifications/create';
 
 // Meta calls GET /webhook/whatsapp to verify the endpoint.
 // We confirm by echoing back the hub.challenge value.
@@ -240,6 +241,19 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
               patientPhone,
               reason: result.escalationReason,
             });
+
+            await createNotification({
+              clinicId: clinic.id,
+              type: 'escalation',
+              title: escalationTitle(result.escalationReason),
+              body: `Patient ${patientPhone} — ${result.escalationReason?.replace('_', ' ').toLowerCase()}. Click Review to take over.`,
+              metadata: {
+                conversationId: conversation.id,
+                patientPhone,
+                reason: result.escalationReason,
+              },
+            });
+
             logger.warn('Conversation escalated', {
               clinicId: clinic.id,
               conversationId: conversation.id,
@@ -252,5 +266,15 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
   } catch (err) {
     // Log but never let webhook processing crash the server
     logger.error('Webhook processing error', { error: (err as Error).message });
+  }
+}
+
+function escalationTitle(reason: string | null): string {
+  switch (reason) {
+    case 'URGENT_MEDICAL':   return 'Symptom flagged as urgent';
+    case 'BILLING_DISPUTE':  return 'Patient dispute — billing question';
+    case 'PATIENT_ANGRY':    return 'Patient expressing frustration';
+    case 'OUT_OF_SCOPE':     return 'Request outside clinic services';
+    default:                 return 'Conversation needs review';
   }
 }
