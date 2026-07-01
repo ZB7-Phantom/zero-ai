@@ -68,12 +68,27 @@ app.use(errorHandler); // Must be last
 async function start() {
   await prisma.$connect();
   logger.info('Database connected');
-  await scheduleMidnightReset();
-  await scheduleReminders();
-  await scheduleNoShowDetector();
-  logger.info('Scheduler ready');
-  logger.info(`Binding to port: ${env.PORT} (from env: ${process.env.PORT})`);
-  server.listen(parseInt(env.PORT), () => logger.info(`Zero API on port ${env.PORT}`));
+
+  // Bind port first so Railway health check succeeds immediately
+  await new Promise<void>((resolve) => {
+    server.listen(parseInt(env.PORT), () => {
+      logger.info(`Zero API on port ${env.PORT}`);
+      resolve();
+    });
+  });
+
+  // Schedulers run after server is accepting connections
+  // Failures here do not take down the server
+  try {
+    await scheduleMidnightReset();
+    await scheduleReminders();
+    await scheduleNoShowDetector();
+    logger.info('Scheduler ready');
+  } catch (err) {
+    logger.error('Scheduler init failed — server remains up', {
+      error: (err as Error).message,
+    });
+  }
 }
 
 process.on('SIGTERM', async () => { await prisma.$disconnect(); process.exit(0); });
