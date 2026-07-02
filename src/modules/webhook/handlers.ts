@@ -170,6 +170,8 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             }),
           ]);
 
+          logger.info(`Conversation state saved — newState: ${newState.state}, dataKeys: ${Object.keys(newState.data).join(',')}`);
+
           // If intake is complete, upsert the patient record
           if (result.isComplete && updatedData.name) {
             // Before the upsert, get the next queue number

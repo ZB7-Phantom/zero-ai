@@ -588,11 +588,7 @@ export async function processMessage(
   state: AiConversationState,
   clinic: Clinic
 ): Promise<BrainResult> {
-  logger.info('Brain state debug', {
-    incomingState: state.state,
-    incomingData: state.data,
-    message: message.slice(0, 50),
-  });
+  logger.info(`Brain state debug — state: ${state.state}, data keys: ${Object.keys(state.data).join(',')}, msg: ${message.slice(0,30)}`);
 
   try {
     // Track how many consecutive messages failed to extract any data.
