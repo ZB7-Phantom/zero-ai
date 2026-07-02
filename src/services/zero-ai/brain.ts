@@ -80,6 +80,14 @@ function normalise(raw: string): string {
  * where the patient is answering Zero's last question.
  */
 function classifyIntent(text: string, state: AiConversationState): Intent {
+  // Check menu selections first — these are unambiguous
+  if (['START', 'MENU', 'IDLE'].includes(state.state)) {
+    if (/^[1１]$/.test(text.trim())) return 'WALKIN';
+    if (/^[2２]$/.test(text.trim())) return 'APPOINTMENT';
+    if (/^[3３]$/.test(text.trim())) return 'ON_MY_WAY';
+    if (/^[4４]$/.test(text.trim())) return 'QUEUE_CHECK';
+  }
+
   // Escalation triggers — checked first, highest priority
   if (matchesAny(text, ESCALATION_PATTERNS)) return 'ESCALATION_TRIGGER';
 
@@ -580,6 +588,12 @@ export async function processMessage(
   state: AiConversationState,
   clinic: Clinic
 ): Promise<BrainResult> {
+  logger.info('Brain state debug', {
+    incomingState: state.state,
+    incomingData: state.data,
+    message: message.slice(0, 50),
+  });
+
   try {
     // Track how many consecutive messages failed to extract any data.
     // Stored in state so it persists across turns.
