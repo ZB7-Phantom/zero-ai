@@ -65,6 +65,15 @@ export async function processMessage(
   ];
 
   try {
+    const testResponse = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models?key=' + env.GEMINI_API_KEY
+    );
+    const testJson = await testResponse.json();
+    logger.info('Gemini API test', {
+      status: testResponse.status,
+      error: testJson.error?.message || 'none',
+    });
+
     const result = await model.generateContent({ contents });
     const raw = cleanJson(result.response.text());
     const parsed = BrainResponseSchema.safeParse(JSON.parse(raw));
