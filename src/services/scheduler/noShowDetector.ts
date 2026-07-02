@@ -4,8 +4,21 @@ import { prisma } from '../../config/database';
 import { logger } from '../../config/logger';
 import { createNotification } from '../notifications/create';
 
+import { createBullClient } from '../../config/bullRedis';
+
 export const noShowQueue = new Bull('no-show-detector', {
-  redis: { ...redis.options },
+  createClient: createBullClient,
+});
+
+noShowQueue.on('error', (err) => {
+  logger.error('noShowQueue queue error', { error: err.message });
+});
+
+noShowQueue.on('failed', (job, err) => {
+  logger.error('noShowQueue job failed', {
+    jobId: job.id,
+    error: err.message,
+  });
 });
 
 noShowQueue.process('detect-no-shows', async () => {

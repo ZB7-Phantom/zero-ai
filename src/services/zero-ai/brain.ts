@@ -4,6 +4,15 @@ import { env } from '../../config/env';
 import { logger } from '../../config/logger';
 import { AiConversationState } from '../../types';
 import { buildSystemPrompt } from './prompts';
+import { z } from 'zod';
+
+const BrainResponseSchema = z.object({
+  reply: z.string().min(1),
+  extracted: z.record(z.string(), z.any()).default({}),
+  isComplete: z.boolean().default(false),
+  escalate: z.boolean().default(false),
+  escalationReason: z.string().nullable().default(null),
+});
 
 const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
 
@@ -58,15 +67,11 @@ export async function processMessage(
   try {
     const result = await model.generateContent({ contents });
     const raw = cleanJson(result.response.text());
-    const parsed = JSON.parse(raw);
-
-    return {
-      reply: parsed.reply || "I didn't catch that — could you say it again?",
-      extracted: parsed.extracted || {},
-      isComplete: parsed.isComplete === true,
-      escalate: parsed.escalate === true,
-      escalationReason: parsed.escalationReason || null,
-    };
+    const parsed = BrainResponseSchema.safeParse(JSON.parse(raw));
+    if (!parsed.success) {
+      throw new Error(`Invalid Gemini response shape: ${parsed.error.message}`);
+    }
+    return parsed.data;
   } catch (err: any) {
     logger.error('Zero AI brain error', { error: err.message, clinicId: clinic.id });
     // Safe fallback — keeps the conversation alive without crashing

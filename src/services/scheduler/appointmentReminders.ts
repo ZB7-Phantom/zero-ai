@@ -4,7 +4,22 @@ import { prisma } from '../../config/database';
 import { logger } from '../../config/logger';
 import { sendWhatsAppMessage } from '../whatsapp/client';
 
-export const reminderQueue = new Bull('appointment-reminders', { redis: { ...redis.options } });
+import { createBullClient } from '../../config/bullRedis';
+
+export const reminderQueue = new Bull('appointment-reminders', {
+  createClient: createBullClient,
+});
+
+reminderQueue.on('error', (err) => {
+  logger.error('reminderQueue queue error', { error: err.message });
+});
+
+reminderQueue.on('failed', (job, err) => {
+  logger.error('reminderQueue job failed', {
+    jobId: job.id,
+    error: err.message,
+  });
+});
 
 reminderQueue.process('send-24h-reminders', async () => {
   const now = new Date();
@@ -22,6 +37,8 @@ reminderQueue.process('send-24h-reminders', async () => {
 
   logger.info('Reminder job running', { count: dueAppointments.length });
 
+  const sentIds: string[] = [];
+
   for (const appt of dueAppointments) {
     if (!appt.clinic.phoneNumberId || !appt.patientPhone) continue;
 
@@ -34,9 +51,13 @@ reminderQueue.process('send-24h-reminders', async () => {
     const message = `Hi ${appt.patientName || ''}, this is a reminder from ${appt.clinic.name} — you have an appointment ${time}${appt.doctorName ? ` with ${appt.doctorName}` : ''}. Reply CANCEL if you can no longer make it.`;
 
     await sendWhatsAppMessage(appt.clinic.phoneNumberId, appt.patientPhone, message);
+    sentIds.push(appt.id);
+  }
 
-    await prisma.appointment.update({
-      where: { id: appt.id },
+  // Single batch update instead of one UPDATE per appointment
+  if (sentIds.length > 0) {
+    await prisma.appointment.updateMany({
+      where: { id: { in: sentIds } },
       data: { reminder24hSentAt: new Date() },
     });
   }

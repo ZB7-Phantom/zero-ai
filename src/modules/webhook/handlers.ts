@@ -75,20 +75,16 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           logger.info('Inbound message', { clinicId: clinic.id, from: patientPhone });
 
           // Find or create conversation for this patient
-          let conversation = await prisma.conversation.findFirst({
-            where: { clinicId: clinic.id, patientPhone },
+          const conversation = await prisma.conversation.upsert({
+            where: { clinicId_patientPhone: { clinicId: clinic.id, patientPhone } },
+            create: {
+              clinicId: clinic.id,
+              patientPhone,
+              patientName: value.contacts?.[0]?.profile?.name || null,
+              aiState: { state: 'START', data: {}, history: [] } as any,
+            },
+            update: {}, // No update needed — just ensure it exists
           });
-
-          if (!conversation) {
-            conversation = await prisma.conversation.create({
-              data: {
-                clinicId: clinic.id,
-                patientPhone,
-                patientName: value.contacts?.[0]?.profile?.name || null,
-                aiState: { state: 'START', data: {}, history: [] } as any,
-              },
-            });
-          }
 
           // If staff took over, AI stays silent — message still saved
           if (conversation.isAiPaused) {
@@ -126,7 +122,8 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             ...currentState.history,
             { role: 'user' as const, content: messageText },
             { role: 'model' as const, content: result.reply },
-          ];
+          ].slice(-50); // Keep last 50 turns maximum — full history
+                        // is always in ConversationMessage table
 
           const newState: AiConversationState = {
             state: result.isComplete ? 'COMPLETE' : currentState.state,
@@ -178,29 +175,31 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             // Before the upsert, get the next queue number
             const queueNumber = await assignQueueNumber(clinic.id);
 
-            await prisma.patient.upsert({
-              where: { clinicId_phone: { clinicId: clinic.id, phone: patientPhone } },
-              create: {
-                clinicId: clinic.id,
-                phone: patientPhone,
-                name: updatedData.name,
-                age: updatedData.age ? parseInt(String(updatedData.age)) : null,
-                gender: updatedData.gender,
-                complaint: updatedData.complaint,
-                symptoms: updatedData.symptoms,
-                queueNumber,
-                patientType: 'WALK_IN',
-                status: 'WAITING',
-                arrivalTime: new Date(),
-              },
-              update: {
-                name: updatedData.name,
-                complaint: updatedData.complaint,
-                symptoms: updatedData.symptoms,
-                queueNumber,
-                status: 'WAITING',
-                arrivalTime: new Date(),
-              },
+            await prisma.$transaction(async (tx) => {
+              await tx.patient.upsert({
+                where: { clinicId_phone: { clinicId: clinic.id, phone: patientPhone } },
+                create: {
+                  clinicId: clinic.id,
+                  phone: patientPhone,
+                  name: updatedData.name,
+                  age: updatedData.age ? parseInt(String(updatedData.age)) : null,
+                  gender: updatedData.gender,
+                  complaint: updatedData.complaint,
+                  symptoms: updatedData.symptoms,
+                  queueNumber,
+                  patientType: 'WALK_IN',
+                  status: 'WAITING',
+                  arrivalTime: new Date(),
+                },
+                update: {
+                  name: updatedData.name,
+                  complaint: updatedData.complaint,
+                  symptoms: updatedData.symptoms,
+                  queueNumber,
+                  status: 'WAITING',
+                  arrivalTime: new Date(),
+                },
+              });
             });
 
             // If this was an appointment booking, create the Appointment record

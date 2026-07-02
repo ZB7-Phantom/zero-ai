@@ -3,8 +3,23 @@ import { redis } from '../../config/redis';
 import { prisma } from '../../config/database';
 import { logger } from '../../config/logger';
 
+import { createBullClient } from '../../config/bullRedis';
+
 // Queue for daily midnight jobs
-export const dailyJobQueue = new Bull('daily-jobs', { redis: { ...redis.options } });
+export const dailyJobQueue = new Bull('daily-jobs', {
+  createClient: createBullClient,
+});
+
+dailyJobQueue.on('error', (err) => {
+  logger.error('dailyJobQueue queue error', { error: err.message });
+});
+
+dailyJobQueue.on('failed', (job, err) => {
+  logger.error('dailyJobQueue job failed', {
+    jobId: job.id,
+    error: err.message,
+  });
+});
 
 // Runs once per day — resets daily counters and updates recall status
 dailyJobQueue.process('midnight-reset', async () => {
