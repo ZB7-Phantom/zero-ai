@@ -269,6 +269,12 @@ STRICT RULES:
 - Never invent symptoms or data the patient did not provide
 - No emoji unless the instruction specifies them
 
+CRITICAL: You are NEVER allowed to say the patient has been
+registered, added to a queue, or that their appointment is
+booked UNLESS the INSTRUCTION explicitly tells you to confirm
+registration. If the instruction asks for a name, ask for
+the name and nothing else.
+
 RESPOND ONLY WITH THIS JSON — no markdown, no explanation:
 {
   "reply": "your WhatsApp message",
@@ -560,19 +566,8 @@ export async function processMessage(
 
     try {
       const geminiResult = await callGemini(message, state.history, instruction, clinic);
-      const geminiReply = geminiResult.reply;
+      reply = geminiResult.reply;
       extracted = { ...modeUpdate, ...geminiResult.extracted };
-
-      // Validate Gemini didn't hallucinate a completion message
-      if (!validateGeminiReply(geminiReply, nextState, isComplete)) {
-        logger.warn('Gemini reply failed validation — using fallback', {
-          reply: geminiReply.slice(0, 100),
-          nextState,
-        });
-        reply = fallbackReply(nextState, tentativeData, clinic);
-      } else {
-        reply = geminiReply;
-      }
 
       // Increment followUpCount when in symptom collection
       if (nextState === 'COLLECTING_SYMPTOMS' && (extracted.symptoms || state.data.symptoms)) {
@@ -588,22 +583,42 @@ export async function processMessage(
     } catch (geminiErr) {
       // Layer 6: Fallback if Gemini fails
       logger.warn(`Gemini failed: ${(geminiErr as Error).message} | ${(geminiErr as Error).stack?.split('\\n')[1]}`);
-      reply = fallbackReply(nextState, tentativeData, clinic);
+      reply = '';
       extracted = modeUpdate;
+    }
+
+    // After the try/catch, build mergedData
+    const mergedData = { ...tentativeData, ...extracted };
+
+    // Recalculate nextState with full merged data
+    const finalNextState = isComplete
+      ? 'COMPLETE'
+      : getNextState(state.state, intent, mergedData);
+    const finalIsComplete = finalNextState === 'COMPLETE';
+
+    // Validate Gemini reply against finalNextState
+    if (!reply || !validateGeminiReply(reply, finalNextState, finalIsComplete)) {
+      if (reply) {
+        logger.warn('Gemini reply failed validation — using fallback', {
+          reply: reply.slice(0, 80),
+          nextState: finalNextState,
+        });
+      }
+      reply = fallbackReply(finalNextState, mergedData, clinic);
     }
 
     logger.info('Brain processed', {
       clinicId: clinic.id,
       intent,
-      nextState,
-      isComplete,
+      nextState: finalNextState,
+      isComplete: finalIsComplete,
       extractedFields: Object.keys(extracted),
     });
 
     return {
       reply,
       extracted,
-      isComplete,
+      isComplete: finalIsComplete,
       escalate: false,
       escalationReason: null,
       department,
