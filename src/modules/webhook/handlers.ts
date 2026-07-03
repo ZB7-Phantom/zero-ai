@@ -177,16 +177,13 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             ),
           };
 
-          logger.info(`Webhook merged data: ${JSON.stringify(mergedData)}`);
-          logger.info(`Result extracted: ${JSON.stringify(result.extracted)}`);
-          logger.info(`Current state going in: ${currentState.state}`);
+
 
           const nextStateName = result.isComplete
             ? 'COMPLETE'
             : getNextState(currentState.state, intent, mergedData);
 
-          logger.info(`Next state calculated: ${nextStateName}`);
-          logger.info(`Brain state debug — state: ${nextStateName}`);
+
 
           const newState: AiConversationState = {
             state: nextStateName as AiConversationState['state'],
@@ -233,7 +230,10 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             }),
           ]);
 
-          logger.info(`Conversation state saved — newState: ${newState.state}, dataKeys: ${Object.keys(newState.data).join(',')}`);
+          logger.info('Conversation state saved', {
+            newState: newState.state,
+            dataKeys: Object.keys(newState.data),
+          });
 
           let finalReply = result.reply;
 
