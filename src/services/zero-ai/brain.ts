@@ -534,10 +534,7 @@ export async function processMessage(
 
     } catch (geminiErr) {
       // Layer 6: Fallback if Gemini fails
-      logger.warn('Gemini call failed — using deterministic fallback', {
-        error: (geminiErr as Error).message,
-        clinicId: clinic.id,
-      });
+      logger.warn(`Gemini failed: ${(geminiErr as Error).message} | ${(geminiErr as Error).stack?.split('\\n')[1]}`);
       reply = fallbackReply(nextState, tentativeData, clinic);
       extracted = modeUpdate;
     }
