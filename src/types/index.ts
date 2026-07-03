@@ -9,7 +9,7 @@ export interface AuthenticatedRequest extends Request {
 
 // AI conversation state stored in Conversation.aiState (JSON column)
 export interface AiConversationState {
-  state: 'START' | 'MENU' | 'COLLECTING_DETAILS' | 'COLLECTING_SYMPTOMS' | 'COLLECTING_APPOINTMENT_DATE' | 'COLLECTING_APPOINTMENT_TIME' | 'COMPLETE' | 'IDLE';
+  state: 'START' | 'MENU' | 'COLLECTING_DETAILS' | 'COLLECTING_SYMPTOMS' | 'AWAITING_CONFIRMATION' | 'COLLECTING_APPOINTMENT_DATE' | 'COLLECTING_APPOINTMENT_TIME' | 'COMPLETE' | 'IDLE';
   data: Partial<{
     name: string; age: number; gender: string;
     complaint: string; symptoms: string;

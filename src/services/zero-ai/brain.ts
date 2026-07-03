@@ -248,7 +248,10 @@ function extractFirstName(fullName: string): string {
   if (parts.length === 0) return fullName;
   const firstLower = parts[0].replace('.', '').toLowerCase();
   if (HONORIFICS.has(firstLower)) {
-    return `${parts[0].replace('.', '')}.${parts.length > 1 ? ' ' + parts[parts.length - 1] : ''}`;
+    // Use "Dr. Damodred" — title + last name
+    const title = parts[0].replace('.', '') + '.';
+    const lastName = parts.length > 1 ? parts[parts.length - 1] : '';
+    return `${title} ${lastName}`.trim();
   }
   return parts[0];
 }
@@ -298,9 +301,23 @@ async function callGemini(
   - For sensitive topics (sexual health, mental health,
     personal struggles): lead with warmth and zero judgment
     before asking any question.
-  - NEVER assume the patient is unwell before they say so.
+  - ABSOLUTE RULE: Do NOT express sympathy for illness,
+    pain, or discomfort until the patient has explicitly
+    described a symptom in their own words. Saying "I'm
+    sorry to hear you've been feeling unwell" before the
+    patient mentions any symptom is a violation of patient
+    trust. Wait. Listen first.
+  - When a patient provides a name with a title (Dr., Mrs.,
+    Mr., Prof.), ALWAYS address them using their title and
+    last name. NEVER drop the title or use only the first
+    name. "Dr. Damodred", "Mrs. Okonkwo", "Prof. Williams".
 
   CRITICAL RULES:
+  - NEVER ask for information that already exists in the
+    INSTRUCTION context or in the conversation history.
+    If the INSTRUCTION shows the patient's name, age, or
+    any other field — those are already collected. Do not
+    ask for them again under any circumstances.
   - Follow the INSTRUCTION exactly. If it says ask for name,
     ask for name and nothing else.
   - NEVER claim registration is complete, queue is assigned,
@@ -433,8 +450,7 @@ function fallbackReply(
     case 'AWAITING_CONFIRMATION': {
       if (data.mode === 'walkin') {
         const { department, urgency } = routeToDepAndUrgency(data);
-        const urgencyEmoji = urgency === 'HIGH' ? '🔴' : urgency === 'MEDIUM' ? '🟡' : '🟢';
-        return `Here is what I have for you, ${firstName}:\n\n👤 *Name:* ${data.name}\n🎂 *Age:* ${data.age}\n⚕️ *Complaint:* ${data.complaint}\n🏥 *Department:* ${department}\n${urgencyEmoji} *Urgency:* ${urgency}\n\nIs everything correct? Reply *Yes* to confirm or let me know what needs to be updated.`;
+        return `Here is what I have for you, ${firstName}:\n\n*Name:* ${data.name}\n*Age:* ${data.age}\n*Complaint:* ${data.complaint}\n*Department:* ${department}\n*Urgency:* ${urgency}\n\nIs everything correct? Reply *Yes* to confirm or let me know what needs to be updated.`;
       }
       return `Please reply *Yes* to confirm your details or let me know what you want to change.`;
     }
@@ -475,7 +491,6 @@ function buildInstruction(
 
   if (isComplete) {
     const { department, urgency } = routeToDepAndUrgency(data);
-    const urgencyEmoji = urgency === 'HIGH' ? '🔴' : urgency === 'MEDIUM' ? '🟡' : '🟢';
     const mode = data.mode;
     if (mode === 'walkin') {
       return `Intake confirmed. Assign the queue number now.
@@ -483,12 +498,12 @@ function buildInstruction(
 
     ✅ *You're all set, ${data.name}!*
 
-    🔢 *Queue Number:* #${queuePlaceholder}
-    🏥 *Department:* ${department}
-    ${urgencyEmoji} *Urgency:* ${urgency}
+    *Queue Number:* #${queuePlaceholder}
+    *Department:* ${department}
+    *Urgency:* ${urgency}
 
     Please take a seat — I'll message you the moment
-    it's your turn. 🙏`;
+    it's your turn.`;
     }
     if (mode === 'appointment') {
       return `Appointment booked. Confirm with this format:\n✅ *Appointment request submitted, ${data.name}.*\n\n📅 Date: *${data.appointmentDate}*\n⏰ Time: *${data.appointmentTime}*\n🏥 Service: *${data.complaint}*\n\nThe clinic will confirm shortly. 🙏\n\nDo not add or change anything.`;
@@ -500,9 +515,6 @@ function buildInstruction(
     case 'AWAITING_CONFIRMATION':
       if (data.mode === 'walkin') {
         const { department, urgency } = routeToDepAndUrgency(data);
-        const urgencyEmoji = urgency === 'HIGH' ? '🔴'
-          : urgency === 'MEDIUM' ? '🟡' : '🟢';
-    
         return `Intake is complete. Before assigning the queue,
         warmly summarise what was collected and ask the patient
         to confirm everything is correct. Use this exact format
@@ -511,11 +523,11 @@ function buildInstruction(
     
         Here is what I have for you, ${firstName}:
     
-        👤 *Name:* ${data.name}
-        🎂 *Age:* ${data.age}
-        ⚕️ *Complaint:* ${data.complaint}
-        🏥 *Department:* ${department}
-        ${urgencyEmoji} *Urgency:* ${urgency}
+        *Name:* ${data.name}
+        *Age:* ${data.age}
+        *Complaint:* ${data.complaint}
+        *Department:* ${department}
+        *Urgency:* ${urgency}
     
         Is everything correct? Reply *Yes* to confirm or let me
         know what needs to be updated.
@@ -646,27 +658,39 @@ export async function processMessage(
     let finalNextState: string = state.state;
     let finalIsComplete = false;
 
-    try {
-      // Step 1: Call Gemini with a simple extraction-focused prompt
-      // just to get the data out of this message
-      const extractionPrompt = `Extract any patient data from
-      this message. Fields to look for: name, age, gender,
-      complaint, symptoms, appointmentDate, appointmentTime.
-      Reply with the standard JSON but set reply to empty string.`;
+    // Pass 1: extraction only
+    // Tell Gemini what's already collected so it doesn't
+    // re-extract stale data or lose existing fields
+    const extractionPrompt = `Current collected data:
+    ${JSON.stringify(state.data)}
 
-      const { extracted: geminiExtracted } = await callGemini(
+    Extract ONLY NEW fields from this patient message that
+    are not already in the collected data above.
+    Fields: name, age, gender, complaint, symptoms,
+    appointmentDate, appointmentTime.
+    Set reply to empty string "".
+    Only include fields you actually found in this message.`;
+
+    try {
+      const extractResult = await callGemini(
         message, state.history, extractionPrompt, clinic
       );
+      // Merge: only take new non-null fields, never overwrite existing
+      for (const [key, val] of Object.entries(extractResult.extracted)) {
+        if (val !== null && val !== undefined && val !== '') {
+          if (!(state.data as any)[key]) {
+            (extracted as any)[key] = val;
+          }
+        }
+      }
+    } catch {
+      // Extraction failed silently — continue with what we have
+    }
 
-      extracted = { ...modeUpdate, ...geminiExtracted };
+    // Build mergedData preserving ALL existing data
+    mergedData = { ...tentativeData, ...extracted };
 
-      // Step 2: Build mergedData with the extraction
-      mergedData = {
-        ...tentativeData,
-        ...Object.fromEntries(
-          Object.entries(extracted).filter(([,v]) => v !== null && v !== undefined)
-        ),
-      };
+    try {
 
       // Increment followUpCount when in symptom collection
       if (nextState === 'COLLECTING_SYMPTOMS' && (mergedData.symptoms || state.data.symptoms)) {

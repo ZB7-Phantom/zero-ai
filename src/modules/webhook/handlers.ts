@@ -139,8 +139,8 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           // Determine if this message is likely to complete intake
           // so we can pre-assign a queue number for the confirmation message
           const isWalkinAboutToComplete =
-            currentState.state === 'COLLECTING_SYMPTOMS' &&
-            ((currentState.data as any).followUpCount || 0) >= 1 &&
+            (currentState.state === 'COLLECTING_SYMPTOMS' ||
+             currentState.state === 'AWAITING_CONFIRMATION') &&
             currentState.data.mode === 'walkin';
 
           let preAssignedQueueNumber: number | undefined;
