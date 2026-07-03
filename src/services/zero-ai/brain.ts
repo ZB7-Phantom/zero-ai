@@ -290,7 +290,7 @@ Only include extracted fields you actually found. Never guess.`;
     generationConfig: {
       responseMimeType: 'application/json',
       temperature: 0.4,
-      maxOutputTokens: 400,
+      maxOutputTokens: 1024,
     },
   });
 
@@ -307,12 +307,18 @@ Only include extracted fields you actually found. Never guess.`;
   ];
 
   const result = await model.generateContent({ contents });
-  const raw = result.response
-    .text()
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/i, '')
-    .replace(/```\s*$/i, '')
-    .trim();
+  const rawText = result.response.text();
+
+  // Extract JSON object from response — find the first { and
+  // last } and take everything between them
+  const jsonStart = rawText.indexOf('{');
+  const jsonEnd = rawText.lastIndexOf('}');
+
+  if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+    throw new Error(`No valid JSON object found in Gemini response: ${rawText.slice(0, 100)}`);
+  }
+
+  const raw = rawText.slice(jsonStart, jsonEnd + 1);
 
   const parsed = JSON.parse(raw);
 
