@@ -139,14 +139,6 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             preAssignedQueueNumber
           );
 
-          // Merge newly extracted fields into existing collected data
-          const updatedData = {
-            ...currentState.data,
-            ...Object.fromEntries(
-              Object.entries(result.extracted).filter(([, v]) => v !== null && v !== undefined)
-            ),
-          };
-
           // Append this exchange to history
           const updatedHistory = [
             ...currentState.history,
@@ -155,15 +147,34 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           ].slice(-50); // Keep last 50 turns maximum — full history
                         // is always in ConversationMessage table
 
-          const nextStateName = getNextState(
-            currentState.state,
-            messageText,
-            updatedData
-          );
+          const norm = messageText.toLowerCase().trim();
+          const intent = (() => {
+            if (/^[1]$/.test(norm)) return 'WALKIN';
+            if (/^[2]$/.test(norm)) return 'APPOINTMENT';
+            if (/^[3]$/.test(norm)) return 'ON_MY_WAY';
+            if (/^[4]$/.test(norm)) return 'QUEUE_CHECK';
+            if (/^(restart|start over|menu)$/.test(norm)) return 'RESTART';
+            if (!['START','MENU','IDLE','COMPLETE'].includes(currentState.state))
+              return 'PROVIDING_DATA';
+            return 'UNKNOWN';
+          })() as any;
+
+          const mergedData = {
+            ...currentState.data,
+            ...Object.fromEntries(
+              Object.entries(result.extracted).filter(([, v]) => v !== null && v !== undefined)
+            ),
+          };
+
+          const nextStateName = result.isComplete
+            ? 'COMPLETE'
+            : getNextState(currentState.state, intent, mergedData);
+
+          logger.info(`Brain state debug — state: ${nextStateName}`);
 
           const newState: AiConversationState = {
-            state: result.isComplete ? 'COMPLETE' : (nextStateName as AiConversationState['state']),
-            data: updatedData,
+            state: nextStateName as AiConversationState['state'],
+            data: mergedData,
             history: updatedHistory,
           };
 
@@ -211,7 +222,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           let finalReply = result.reply;
 
           // If intake is complete, upsert the patient record
-          if (result.isComplete && updatedData.name) {
+          if (result.isComplete && mergedData.name) {
             // Before the upsert, get the next queue number
             const queueNumber = preAssignedQueueNumber || await assignQueueNumber(clinic.id);
 
@@ -224,11 +235,11 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
                 create: {
                   clinicId: clinic.id,
                   phone: patientPhone,
-                  name: updatedData.name,
-                  age: updatedData.age ? parseInt(String(updatedData.age)) : null,
-                  gender: updatedData.gender,
-                  complaint: updatedData.complaint,
-                  symptoms: updatedData.symptoms,
+                  name: mergedData.name,
+                  age: mergedData.age ? parseInt(String(mergedData.age)) : null,
+                  gender: mergedData.gender,
+                  complaint: mergedData.complaint,
+                  symptoms: mergedData.symptoms,
                   department: department || 'General',
                   urgency: urgency || 'LOW',
                   queueNumber,
@@ -237,9 +248,9 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
                   arrivalTime: new Date(),
                 },
                 update: {
-                  name: updatedData.name,
-                  complaint: updatedData.complaint,
-                  symptoms: updatedData.symptoms,
+                  name: mergedData.name,
+                  complaint: mergedData.complaint,
+                  symptoms: mergedData.symptoms,
                   department: department || 'General',
                   urgency: urgency || 'LOW',
                   queueNumber,
@@ -250,20 +261,20 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             });
 
             // If this was an appointment booking, create the Appointment record
-            if (updatedData.mode === 'appointment' && updatedData.appointmentDate && updatedData.appointmentTime) {
-              const scheduledAt = new Date(`${updatedData.appointmentDate} ${updatedData.appointmentTime}`);
+            if (mergedData.mode === 'appointment' && mergedData.appointmentDate && mergedData.appointmentTime) {
+              const scheduledAt = new Date(`${mergedData.appointmentDate} ${mergedData.appointmentTime}`);
               if (!isNaN(scheduledAt.getTime())) {
                 await bookAppointmentFromWhatsApp(
                   clinic.id,
                   patientPhone,
-                  updatedData.name,
+                  mergedData.name as string,
                   scheduledAt,
-                  updatedData.complaint
+                  mergedData.complaint
                 );
               } else {
                 logger.warn('Could not parse appointment date/time', {
-                  date: updatedData.appointmentDate,
-                  time: updatedData.appointmentTime,
+                  date: mergedData.appointmentDate,
+                  time: mergedData.appointmentTime,
                 });
               }
             }
