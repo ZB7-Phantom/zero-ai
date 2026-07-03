@@ -148,6 +148,11 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             preAssignedQueueNumber = await assignQueueNumber(clinic.id);
           }
 
+          currentState.data = {
+            ...currentState.data,
+            _lastMessage: messageText,
+          } as any;
+
           const result = await processMessage(
             messageText,
             currentState,
