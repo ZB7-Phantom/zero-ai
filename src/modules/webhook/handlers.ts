@@ -196,6 +196,8 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           if (result.isComplete && updatedData.name) {
             // Before the upsert, get the next queue number
             const queueNumber = await assignQueueNumber(clinic.id);
+            const department = (result as any)._department;
+            const urgency = (result as any)._urgency;
 
             await prisma.$transaction(async (tx) => {
               await tx.patient.upsert({
@@ -208,6 +210,8 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
                   gender: updatedData.gender,
                   complaint: updatedData.complaint,
                   symptoms: updatedData.symptoms,
+                  department: department || 'General',
+                  urgency: urgency || 'LOW',
                   queueNumber,
                   patientType: 'WALK_IN',
                   status: 'WAITING',
@@ -217,6 +221,8 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
                   name: updatedData.name,
                   complaint: updatedData.complaint,
                   symptoms: updatedData.symptoms,
+                  department: department || 'General',
+                  urgency: urgency || 'LOW',
                   queueNumber,
                   status: 'WAITING',
                   arrivalTime: new Date(),
@@ -257,6 +263,28 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           });
 
           if (result.escalate) {
+            const queueNumber = await assignQueueNumber(clinic.id);
+            await prisma.patient.upsert({
+              where: { clinicId_phone: { clinicId: clinic.id, phone: patientPhone } },
+              create: {
+                clinicId: clinic.id,
+                phone: patientPhone,
+                name: (currentState.data as any).name || patientPhone,
+                complaint: (currentState.data as any).complaint || 'Escalated',
+                queueNumber,
+                patientType: 'WALK_IN',
+                status: 'WAITING',
+                arrivalTime: new Date(),
+              },
+              update: {
+                name: (currentState.data as any).name || patientPhone,
+                complaint: (currentState.data as any).complaint || 'Escalated',
+                queueNumber,
+                status: 'WAITING',
+                arrivalTime: new Date(),
+              },
+            });
+
             io.to(`clinic:${clinic.id}`).emit('conversation:escalated', {
               conversationId: conversation.id,
               patientPhone,

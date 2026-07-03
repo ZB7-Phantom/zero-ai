@@ -26,6 +26,8 @@ export interface BrainResult {
   isComplete: boolean;
   escalate: boolean;
   escalationReason: string | null;
+  department?: string;
+  urgency?: string;
 }
 
 interface IntakeData {
@@ -304,6 +306,14 @@ function extractComplaint(norm: string): string | null {
     .replace(/\b(a bit of|some|quite a bit of|very bad|terrible|awful)\b/g, '')
     .trim();
 
+  const COMPLAINT_EXCLUDED = new Set([
+    'male','female','prefer','not','say','yes','no','okay',
+    'ok','sure','fine','good','great','m','f'
+  ]);
+
+  // Reject if the entire cleaned string is an excluded word
+  if (COMPLAINT_EXCLUDED.has(cleaned.toLowerCase())) return null;
+
   // Must be at least 3 characters and not a pure number
   if (cleaned.length >= 3 && !/^\d+$/.test(cleaned)) {
     // Capitalise first letter
@@ -487,6 +497,29 @@ function advanceState(
  * When the same field has been asked for twice with no successful
  * extraction (stubCount >= 2), Zero escalates rather than asking again.
  */
+function routeToDepAndUrgency(data: Partial<IntakeData>): { department: string; urgency: string } {
+  const complaint = (data.complaint || '').toLowerCase();
+  const symptoms = (data.symptoms || '').toLowerCase();
+  const combined = complaint + ' ' + symptoms;
+
+  // Urgency detection
+  const isHighUrgency = /\b(chest pain|heart pain|can't breathe|severe|spreading|sharp.*arm|jaw)\b/.test(combined);
+  const isMediumUrgency = /\b(fever|vomit|blood|fracture|broken|unconscious)\b/.test(combined);
+  const urgency = isHighUrgency ? 'HIGH' : isMediumUrgency ? 'MEDIUM' : 'LOW';
+
+  // Department routing
+  let department = 'General';
+  if (/\b(chest|heart|cardiac|palpitation|cardio)\b/.test(combined)) department = 'Cardiology';
+  else if (/\b(tooth|teeth|dental|gum|jaw|brace)\b/.test(combined)) department = 'Dental';
+  else if (/\b(head|migraine|neuro|seizure|memory|stroke)\b/.test(combined)) department = 'Neurology';
+  else if (/\b(skin|rash|acne|itch|derma)\b/.test(combined)) department = 'Dermatology';
+  else if (/\b(physio|joint|muscle|back|knee|shoulder|spine)\b/.test(combined)) department = 'Physiotherapy';
+  else if (/\b(eye|vision|ear|hearing|nose|throat|ent)\b/.test(combined)) department = 'ENT';
+  else if (/\b(lab|test|blood test|urine|sample)\b/.test(combined)) department = 'Laboratory';
+
+  return { department, urgency };
+}
+
 function selectResponse(
   nextState: string,
   intent: Intent,
@@ -541,10 +574,36 @@ function selectResponse(
       }
       return { reply: `Understood. Can you tell me a bit more about what you're experiencing?` };
 
-    case 'COLLECTING_SYMPTOMS':
-      return {
-        reply: `Can you describe your ${data.complaint?.toLowerCase()} in a bit more detail? When did it start, and how would you describe the severity?`,
-      };
+    case 'COLLECTING_SYMPTOMS': {
+      const complaint = (data.complaint || '').toLowerCase();
+  
+      // Cardiac
+      if (/\b(chest|heart|cardiac|palpitation)\b/.test(complaint)) {
+        return { reply: `Can you describe the pain — is it sharp, crushing, or pressure-like? Does it spread to your arm or jaw?` };
+      }
+      // Respiratory
+      if (/\b(cough|breath|wheez|asthma)\b/.test(complaint)) {
+        return { reply: `Is the cough dry or producing mucus? Any fever or difficulty breathing at rest?` };
+      }
+      // Neurological
+      if (/\b(head|migraine|dizz|nausea|vision)\b/.test(complaint)) {
+        return { reply: `Where exactly is the pain? How long has it been going on, and does light or noise make it worse?` };
+      }
+      // Musculoskeletal
+      if (/\b(back|knee|joint|shoulder|muscle|pain)\b/.test(complaint)) {
+        return { reply: `Which area exactly? Did it start suddenly or gradually, and is there any swelling?` };
+      }
+      // Gastrointestinal
+      if (/\b(stomach|abdomen|nausea|vomit|diarrhea|digest)\b/.test(complaint)) {
+        return { reply: `Where in the abdomen? Is it constant or does it come and go? Any nausea or changes in appetite?` };
+      }
+      // Dental
+      if (/\b(tooth|teeth|dental|gum|jaw|brace|align)\b/.test(complaint)) {
+        return { reply: `Which tooth or area is affected? Is there sharp pain, sensitivity to hot or cold, or any swelling?` };
+      }
+      // Default
+      return { reply: `Can you describe it in more detail — when did it start and how severe is it on a scale of 1 to 10?` };
+    }
 
     case 'COLLECTING_APPOINTMENT_DATE':
       return {
@@ -557,23 +616,20 @@ function selectResponse(
       };
 
     case 'COMPLETE': {
+      const { department, urgency } = routeToDepAndUrgency(data);
       const mode = data.mode;
-      if (mode === 'walkin') {
-        return {
-          reply: `You're all set, ${data.name}. You've been added to today's queue. The clinic team will call you when it's your turn. Please have a seat.`,
-        };
-      }
-      if (mode === 'appointment') {
-        return {
-          reply: `Perfect. Your appointment request has been submitted for ${data.appointmentDate} at ${data.appointmentTime}, ${data.name}. The clinic will confirm shortly.`,
-        };
-      }
-      if (mode === 'onmyway') {
-        return {
-          reply: `Got it, ${data.name}. We've let the clinic know you're on your way. See you soon.`,
-        };
-      }
-      return { reply: `You're all set, ${data.name}. The clinic team will be with you shortly.` };
+  
+      // Return department and urgency as part of the result
+      // so the webhook handler can save them to the patient record
+      return {
+        reply: mode === 'walkin'
+          ? `You're all set, ${data.name}. You've been added to today's queue at ${department}. The clinic team will call you when it's your turn. Please take a seat.`
+          : mode === 'appointment'
+          ? `Perfect. Your appointment request has been submitted for ${data.appointmentDate} at ${data.appointmentTime}, ${data.name}. The clinic will confirm shortly.`
+          : `Got it, ${data.name}. We've let the clinic know you're on your way. See you soon.`,
+        _department: department,
+        _urgency: urgency,
+      } as any;
     }
 
     default:
