@@ -10,6 +10,7 @@ import { EscalationReason } from '@prisma/client';
 import { assignQueueNumber } from '../queue/handlers';
 import { bookAppointmentFromWhatsApp } from '../appointments/handlers';
 import { createNotification } from '../../services/notifications/create';
+import { redis } from '../../config/redis';
 
 // Meta calls GET /webhook/whatsapp to verify the endpoint.
 // We confirm by echoing back the hub.challenge value.
@@ -86,8 +87,18 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             update: {}, // No update needed — just ensure it exists
           });
 
-          // If staff took over, AI stays silent — message still saved
-          if (conversation.isAiPaused) {
+          // Prevent concurrent processing of the same conversation
+          // Redis lock expires in 10 seconds — enough for one turn
+          const lockKey = `conv:lock:${conversation.id}`;
+          const locked = await redis.set(lockKey, '1', 'EX', 10, 'NX');
+          if (!locked) {
+            logger.info('Conversation locked — skipping concurrent message');
+            continue;
+          }
+
+          try {
+            // If staff took over, AI stays silent — message still saved
+            if (conversation.isAiPaused) {
             await prisma.conversationMessage.create({
               data: {
                 conversationId: conversation.id,
@@ -114,17 +125,11 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           const lastActivity = conversation.lastMessageAt;
           const sessionExpired = lastActivity && lastActivity < twoHoursAgo;
 
-          // Reset if: session complete/idle, expired, OR if the
-          // patient explicitly sends a greeting/restart on a
-          // non-fresh conversation (they want to start over)
-          const isGreeting = /^(hi|hello|hey|restart|start over|menu)$/i
-            .test(messageText.trim());
-          const hasStaleData = Object.keys(currentState.data).length > 0;
-
+          // Reset if the last session was complete, idle, or if
+          // the conversation has been inactive for over 2 hours
           if (
             ['COMPLETE', 'IDLE'].includes(currentState.state) ||
-            sessionExpired ||
-            (isGreeting && hasStaleData)
+            sessionExpired
           ) {
             currentState.data = {};
             currentState.history = [];
@@ -383,6 +388,9 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
               conversationId: conversation.id,
               reason: result.escalationReason,
             });
+          }
+          } finally {
+            await redis.del(lockKey);
           }
         }
       }

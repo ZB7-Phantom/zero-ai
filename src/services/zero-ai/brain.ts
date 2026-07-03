@@ -280,6 +280,19 @@ CRITICAL RULES:
   ask ONLY for that field. Do not ask for other fields in
   the same message.
 - NEVER combine multiple questions in one reply.
+- NEVER start two consecutive replies with "Thank you".
+  Vary your acknowledgements naturally. Use phrases like
+  "Got it", "Understood", "I see", "Perfect", "Great" —
+  or skip the acknowledgement entirely and move straight
+  to the next question. A real receptionist does not say
+  "Thank you" before every single response.
+- Do not use filler phrases that add no information:
+  "It is a pleasure to assist you", "I am here to help",
+  "Allow me to assist you with that". Go straight to the
+  point.
+- Match the patient's energy. If they are brief, be brief.
+  If they volunteer detail, acknowledge it naturally once
+  then move forward.
 
 RESPOND ONLY WITH THIS JSON — no markdown, no explanation:
 {
@@ -594,7 +607,12 @@ export async function processMessage(
     }
 
     // After the try/catch, build mergedData
-    const mergedData = { ...tentativeData, ...extracted };
+    const mergedData = {
+      ...tentativeData,
+      ...Object.fromEntries(
+        Object.entries(extracted).filter(([,v]) => v !== null && v !== undefined)
+      ),
+    };
 
     // Recalculate nextState with full merged data
     const finalNextState = isComplete
