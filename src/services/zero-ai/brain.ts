@@ -269,11 +269,17 @@ STRICT RULES:
 - Never invent symptoms or data the patient did not provide
 - No emoji unless the instruction specifies them
 
-CRITICAL: You are NEVER allowed to say the patient has been
-registered, added to a queue, or that their appointment is
-booked UNLESS the INSTRUCTION explicitly tells you to confirm
-registration. If the instruction asks for a name, ask for
-the name and nothing else.
+CRITICAL RULES:
+- You are NEVER allowed to say the patient has been registered,
+  added to a queue, or that their appointment is booked UNLESS
+  the INSTRUCTION explicitly says to confirm registration.
+- NEVER assume the patient is unwell, sick, or "not feeling
+  their best" unless they have explicitly described symptoms.
+  Do not add empathy for illness before symptoms are shared.
+- If the INSTRUCTION asks you to ask for a specific field,
+  ask ONLY for that field. Do not ask for other fields in
+  the same message.
+- NEVER combine multiple questions in one reply.
 
 RESPOND ONLY WITH THIS JSON — no markdown, no explanation:
 {
@@ -356,28 +362,28 @@ function validateGeminiReply(
   nextState: string,
   isComplete: boolean
 ): boolean {
+  if (isComplete) return true; // Always allow completion replies
+
   const replyLower = reply.toLowerCase();
 
-  // If not complete, Gemini must NOT generate completion messages
-  if (!isComplete) {
-    const falseCompletionPhrases = [
-      'added you to the queue',
-      'successfully registered',
-      'you are all set',
-      "you're all set",
-      'appointment has been booked',
-      'appointment request submitted',
-      'see you at the clinic',
-      'queue number',
-    ];
-    for (const phrase of falseCompletionPhrases) {
-      if (replyLower.includes(phrase)) return false;
-    }
-  }
+  // Only block replies that explicitly claim registration/booking
+  // is done when we haven't reached COMPLETE state
+  const definiteCompletionPhrases = [
+    'added you to the queue',
+    'added to the queue',
+    'successfully registered',
+    'registration is complete',
+    'you are all set',
+    "you're all set",
+    'appointment has been booked',
+    'appointment is confirmed',
+    'appointment request submitted',
+    'booked your appointment',
+    'your queue number is',
+  ];
 
-  // If collecting details, reply must not claim intake is done
-  if (nextState === 'COLLECTING_DETAILS' || nextState === 'COLLECTING_SYMPTOMS') {
-    if (replyLower.includes('all set') || replyLower.includes('registered')) {
+  for (const phrase of definiteCompletionPhrases) {
+    if (replyLower.includes(phrase)) {
       return false;
     }
   }
