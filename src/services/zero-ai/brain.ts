@@ -343,6 +343,42 @@ Only include extracted fields you actually found. Never guess.`;
   return { reply: parsed.reply || '', extracted };
 }
 
+// ─── VALIDATION ─────────────────────────────────────────────────────────────────
+
+function validateGeminiReply(
+  reply: string,
+  nextState: string,
+  isComplete: boolean
+): boolean {
+  const replyLower = reply.toLowerCase();
+
+  // If not complete, Gemini must NOT generate completion messages
+  if (!isComplete) {
+    const falseCompletionPhrases = [
+      'added you to the queue',
+      'successfully registered',
+      'you are all set',
+      "you're all set",
+      'appointment has been booked',
+      'appointment request submitted',
+      'see you at the clinic',
+      'queue number',
+    ];
+    for (const phrase of falseCompletionPhrases) {
+      if (replyLower.includes(phrase)) return false;
+    }
+  }
+
+  // If collecting details, reply must not claim intake is done
+  if (nextState === 'COLLECTING_DETAILS' || nextState === 'COLLECTING_SYMPTOMS') {
+    if (replyLower.includes('all set') || replyLower.includes('registered')) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 // ─── LAYER 6: DETERMINISTIC FALLBACK ─────────────────────────────────────────
 
 /**
@@ -524,8 +560,19 @@ export async function processMessage(
 
     try {
       const geminiResult = await callGemini(message, state.history, instruction, clinic);
-      reply = geminiResult.reply;
+      const geminiReply = geminiResult.reply;
       extracted = { ...modeUpdate, ...geminiResult.extracted };
+
+      // Validate Gemini didn't hallucinate a completion message
+      if (!validateGeminiReply(geminiReply, nextState, isComplete)) {
+        logger.warn('Gemini reply failed validation — using fallback', {
+          reply: geminiReply.slice(0, 100),
+          nextState,
+        });
+        reply = fallbackReply(nextState, tentativeData, clinic);
+      } else {
+        reply = geminiReply;
+      }
 
       // Increment followUpCount when in symptom collection
       if (nextState === 'COLLECTING_SYMPTOMS' && (extracted.symptoms || state.data.symptoms)) {
