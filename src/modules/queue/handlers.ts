@@ -4,6 +4,7 @@ import { logger } from '../../config/logger';
 import { AppError } from '../../middleware/errorHandler';
 import { AuthenticatedRequest } from '../../types';
 import { io } from '../../app';
+import { sendWhatsAppMessage } from '../../services/whatsapp/client';
 
 function formatQueuePatient(p: any) {
   return {
@@ -132,6 +133,11 @@ export async function updatePatientStatus(
         lastVisitAt: status === 'COMPLETED' ? new Date() : undefined,
       },
     });
+
+    if (status === 'WITH_DOCTOR' && patient.phone && req.clinic.phoneNumberId) {
+      const message = `🏥 *${req.clinic.name}*\n\nHello${patient.name ? ' *' + patient.name + '*' : ''}, it's your turn! 🎉\n\nPlease make your way to the reception desk now. The doctor is ready to see you.`;
+      await sendWhatsAppMessage(req.clinic.phoneNumberId, patient.phone, message);
+    }
 
     // Push real-time update to clinic dashboard
     io.to(`clinic:${req.clinic.id}`).emit('queue:updated', {

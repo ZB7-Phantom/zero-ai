@@ -39,6 +39,8 @@ interface IntakeData {
   appointmentDate: string;
   appointmentTime: string;
   mode: 'walkin' | 'appointment' | 'onmyway' | 'queue_check';
+  firstName?: string;
+  followUpCount?: number;
 }
 
 type Intent =
@@ -198,7 +200,10 @@ function extractEntities(
   // NAME — only extract if not already collected
   if (!collectedData.name) {
     const name = extractName(raw, norm);
-    if (name) extracted.name = name;
+    if (name) {
+      extracted.name = name;
+      (extracted as any).firstName = extractFirstName(name);
+    }
   }
 
   // AGE — extract if not collected
@@ -225,6 +230,14 @@ function extractEntities(
     if (symptoms) extracted.symptoms = symptoms;
   }
 
+  if (collectedData.complaint && collectedData.symptoms !== undefined) {
+    const current = (collectedData as any).followUpCount || 0;
+    const symptoms = extractSymptoms(norm, collectedData.complaint);
+    if (symptoms) {
+      (extracted as any).followUpCount = current + 1;
+    }
+  }
+
   // APPOINTMENT DATE
   if (!collectedData.appointmentDate && collectedData.mode === 'appointment') {
     const date = extractDate(norm);
@@ -238,6 +251,25 @@ function extractEntities(
   }
 
   return extracted;
+}
+
+export function extractFirstName(fullName: string): string {
+  const HONORIFICS = new Set(['mr','mrs','miss','ms','dr','prof','rev','chief','barr','engr','arc']);
+
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length === 0) return fullName;
+
+  const firstLower = parts[0].replace('.','').toLowerCase();
+
+  // If first word is an honorific, address as "Honorific LastName"
+  if (HONORIFICS.has(firstLower)) {
+    const honorific = parts[0].replace('.','') + '.';
+    const lastName = parts[parts.length - 1];
+    return `${honorific} ${lastName}`;
+  }
+
+  // Otherwise just use the first name
+  return parts[0];
 }
 
 function extractName(raw: string, norm: string): string | null {
@@ -460,12 +492,16 @@ function advanceState(
 
     case 'COLLECTING_SYMPTOMS':
       if (data.symptoms) {
-        // If appointment mode, need date and time too
-        if (data.mode === 'appointment') {
-          if (!data.appointmentDate) return 'COLLECTING_APPOINTMENT_DATE';
-          if (!data.appointmentTime) return 'COLLECTING_APPOINTMENT_TIME';
+        const followUpCount = (data as any).followUpCount || 0;
+        if (followUpCount >= 2) {
+          if (data.mode === 'appointment') {
+            if (!data.appointmentDate) return 'COLLECTING_APPOINTMENT_DATE';
+            if (!data.appointmentTime) return 'COLLECTING_APPOINTMENT_TIME';
+          }
+          return 'COMPLETE';
         }
-        return 'COMPLETE';
+        // Stay in COLLECTING_SYMPTOMS for more follow-ups
+        return 'COLLECTING_SYMPTOMS';
       }
       return 'COLLECTING_SYMPTOMS';
 
@@ -526,115 +562,143 @@ function selectResponse(
   data: Partial<IntakeData>,
   clinic: Clinic,
   stubCount: number
-): { reply: string; shouldEscalate?: boolean } {
+): { reply: string; shouldEscalate?: boolean; _department?: string; _urgency?: string } {
 
-  // If we've been stuck on the same field twice, escalate
   if (stubCount >= 2) {
     return {
-      reply: `I'm having trouble understanding — let me connect you with a member of our team who can help directly.`,
+      reply: `I'm having a little trouble understanding — let me connect you with a member of our team who can help directly. 🙏`,
       shouldEscalate: true,
     };
   }
 
-  // Queue check — can happen from any state
   if (intent === 'QUEUE_CHECK') {
     return {
       reply: data.name
-        ? `I can see you're registered, ${data.name}. The clinic staff will call you when it's your turn.`
-        : `You'll need to register first before I can check your queue position. Would you like to do that now?`,
+        ? `I can see you're registered, ${(data as any).firstName || data.name}. The clinic team will call you when it's your turn. Please hold on. 🙏`
+        : `You'll need to register first before I can check your queue position.\n\nWould you like to do that now?`,
     };
   }
 
-  // Cancel
   if (intent === 'CANCEL') {
     return {
-      reply: `No problem. If you need anything else, just send a message and I'll be right here.`,
+      reply: `No problem at all. If you need anything else, just send a message and I'll be right here. 😊`,
     };
   }
+
+  const firstName = (data as any).firstName || data.name || 'there';
+  const clinicName = clinic.name;
 
   switch (nextState) {
     case 'MENU':
       return {
-        reply: `Hello! Welcome to ${clinic.name}. I'm Zero, your AI assistant.\n\nHow can I help you today?\n\n1. Walk-in — join today's queue\n2. Book an appointment\n3. I'm on my way\n4. Check my queue number`,
+        reply: `Hello! Welcome to *${clinicName}*. I'm *Zero*, your AI clinic assistant. 👋\n\nHow can I help you today?\n\n1️⃣ Walk-in — join today's queue\n2️⃣ Book an appointment\n3️⃣ I'm on my way to the clinic\n4️⃣ Check my queue number`,
       };
 
     case 'COLLECTING_DETAILS':
-      // Ask for the next missing field in priority order
       if (!data.name) {
-        return { reply: `Great. I'll get you sorted quickly. What's your full name?` };
+        return { reply: `I'll get you sorted quickly. 😊\n\nWhat's your *full name*?` };
       }
       if (!data.age) {
-        return { reply: `Thanks ${data.name}. How old are you?` };
+        return { reply: `Thanks *${firstName}*. How old are you?` };
       }
       if (!data.gender) {
-        return { reply: `And your gender — Male, Female, or Prefer not to say?` };
+        return { reply: `And your gender — *Male*, *Female*, or *Prefer not to say*?` };
       }
       if (!data.complaint) {
-        return { reply: `What brings you in today, ${data.name}?` };
+        return {
+          reply: `Okay ${firstName}, what brings you to *${clinicName}* today?`,
+        };
       }
-      return { reply: `Understood. Can you tell me a bit more about what you're experiencing?` };
+      return {
+        reply: `Understood. Can you tell me a bit more about what you're experiencing?`,
+      };
 
     case 'COLLECTING_SYMPTOMS': {
       const complaint = (data.complaint || '').toLowerCase();
-  
-      // Cardiac
-      if (/\b(chest|heart|cardiac|palpitation)\b/.test(complaint)) {
-        return { reply: `Can you describe the pain — is it sharp, crushing, or pressure-like? Does it spread to your arm or jaw?` };
+      const followUpCount = (data as any).followUpCount || 0;
+
+      // First follow-up — medically specific question
+      if (followUpCount === 0 || !data.symptoms) {
+        if (/\b(chest|heart|cardiac|palpitation)\b/.test(complaint)) {
+          return { reply: `I'm sorry to hear that, ${firstName}. 🙏\n\nCan you describe the pain — is it *sharp*, *crushing*, or *pressure-like*? And does it spread to your arm or jaw?` };
+        }
+        if (/\b(cough|breath|wheez|asthma|respiratory)\b/.test(complaint)) {
+          return { reply: `Sorry to hear that. Is the cough *dry* or producing mucus? Any fever or difficulty breathing at rest?` };
+        }
+        if (/\b(head|migraine|dizz)\b/.test(complaint)) {
+          return { reply: `I understand. Where exactly is the pain — front, back, or sides? Does light or noise make it worse?` };
+        }
+        if (/\b(tooth|teeth|dental|gum|brace)\b/.test(complaint)) {
+          return { reply: `Which tooth or area is affected? Is there sharp pain, or sensitivity to hot or cold?` };
+        }
+        if (/\b(back|knee|joint|shoulder|muscle)\b/.test(complaint)) {
+          return { reply: `Which area exactly? Did it start suddenly or gradually, and is there any swelling?` };
+        }
+        if (/\b(stomach|abdomen|nausea|vomit|diarrhea)\b/.test(complaint)) {
+          return { reply: `Where in the abdomen? Is it constant or does it come and go?` };
+        }
+        return { reply: `I'm sorry to hear that. 🙏\n\nHow long have you had this, and how would you rate the severity on a scale of *1 to 10*?` };
       }
-      // Respiratory
-      if (/\b(cough|breath|wheez|asthma)\b/.test(complaint)) {
-        return { reply: `Is the cough dry or producing mucus? Any fever or difficulty breathing at rest?` };
+
+      // Second follow-up — duration/onset if not yet known
+      if (followUpCount === 1) {
+        return { reply: `Thank you for sharing that. How long have you been experiencing this — did it start suddenly or has it been building up over time?` };
       }
-      // Neurological
-      if (/\b(head|migraine|dizz|nausea|vision)\b/.test(complaint)) {
-        return { reply: `Where exactly is the pain? How long has it been going on, and does light or noise make it worse?` };
+
+      // Third follow-up — any other symptoms
+      if (followUpCount === 2) {
+        return { reply: `Got it. Are you experiencing any other symptoms alongside this — like fever, fatigue, or anything else unusual?` };
       }
-      // Musculoskeletal
-      if (/\b(back|knee|joint|shoulder|muscle|pain)\b/.test(complaint)) {
-        return { reply: `Which area exactly? Did it start suddenly or gradually, and is there any swelling?` };
-      }
-      // Gastrointestinal
-      if (/\b(stomach|abdomen|nausea|vomit|diarrhea|digest)\b/.test(complaint)) {
-        return { reply: `Where in the abdomen? Is it constant or does it come and go? Any nausea or changes in appetite?` };
-      }
-      // Dental
-      if (/\b(tooth|teeth|dental|gum|jaw|brace|align)\b/.test(complaint)) {
-        return { reply: `Which tooth or area is affected? Is there sharp pain, sensitivity to hot or cold, or any swelling?` };
-      }
-      // Default
-      return { reply: `Can you describe it in more detail — when did it start and how severe is it on a scale of 1 to 10?` };
+
+      return { reply: `Thank you, ${firstName}. I have everything I need.` };
     }
 
     case 'COLLECTING_APPOINTMENT_DATE':
       return {
-        reply: `What date would you like to come in? You can say something like "tomorrow", "Monday", or give me a specific date.`,
+        reply: `What date would you like to come in?\n\nYou can say *"tomorrow"*, *"Monday"*, or give a specific date.`,
       };
 
     case 'COLLECTING_APPOINTMENT_TIME':
       return {
-        reply: `What time works best for you? Morning, afternoon, or a specific time like 10am?`,
+        reply: `What time works best for you?\n\nMorning, afternoon, or a specific time like *10am*?`,
       };
 
     case 'COMPLETE': {
       const { department, urgency } = routeToDepAndUrgency(data);
       const mode = data.mode;
-  
-      // Return department and urgency as part of the result
-      // so the webhook handler can save them to the patient record
+      const urgencyEmoji = urgency === 'HIGH' ? '🔴' : urgency === 'MEDIUM' ? '🟡' : '🟢';
+
+      if (mode === 'walkin') {
+        return {
+          reply: `✅ *You're all set, ${data.name}.*\n\n🔢 Queue Number: *#QUEUE_NUMBER*\n🏥 Department: *${department}*\n${urgencyEmoji} Urgency: *${urgency}*\n\nPlease take a seat at reception. I'll message you when it's your turn. 🙏`,
+          _department: department,
+          _urgency: urgency,
+        };
+      }
+      if (mode === 'appointment') {
+        return {
+          reply: `✅ *Appointment request submitted, ${data.name}.*\n\n📅 Date: *${data.appointmentDate}*\n⏰ Time: *${data.appointmentTime}*\n🏥 Service: *${data.complaint}*\n\nThe clinic will confirm your appointment shortly. 🙏`,
+          _department: department,
+          _urgency: urgency,
+        };
+      }
+      if (mode === 'onmyway') {
+        return {
+          reply: `Got it, *${firstName}*. 👍\n\nWe've let *${clinicName}* know you're on your way. See you soon!`,
+          _department: department,
+          _urgency: urgency,
+        };
+      }
       return {
-        reply: mode === 'walkin'
-          ? `You're all set, ${data.name}. You've been added to today's queue at ${department}. The clinic team will call you when it's your turn. Please take a seat.`
-          : mode === 'appointment'
-          ? `Perfect. Your appointment request has been submitted for ${data.appointmentDate} at ${data.appointmentTime}, ${data.name}. The clinic will confirm shortly.`
-          : `Got it, ${data.name}. We've let the clinic know you're on your way. See you soon.`,
+        reply: `✅ *You're all set, ${firstName}.*\n\nThe clinic team will be with you shortly. 🙏`,
         _department: department,
         _urgency: urgency,
-      } as any;
+      };
     }
 
     default:
       return {
-        reply: `Hello! Welcome to ${clinic.name}. How can I help you today?\n\n1. Walk-in — join today's queue\n2. Book an appointment\n3. I'm on my way\n4. Check my queue number`,
+        reply: `Hello! Welcome to *${clinicName}*. I'm *Zero*, your AI clinic assistant. 👋\n\nHow can I help you today?\n\n1️⃣ Walk-in — join today's queue\n2️⃣ Book an appointment\n3️⃣ I'm on my way to the clinic\n4️⃣ Check my queue number`,
       };
   }
 }

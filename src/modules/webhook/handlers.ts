@@ -192,10 +192,14 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
 
           logger.info(`Conversation state saved — newState: ${newState.state}, dataKeys: ${Object.keys(newState.data).join(',')}`);
 
+          let finalReply = result.reply;
+
           // If intake is complete, upsert the patient record
           if (result.isComplete && updatedData.name) {
             // Before the upsert, get the next queue number
             const queueNumber = await assignQueueNumber(clinic.id);
+            finalReply = finalReply.replace('QUEUE_NUMBER', String(queueNumber));
+
             const department = (result as any)._department;
             const urgency = (result as any)._urgency;
 
@@ -251,7 +255,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           }
 
           // Send reply to patient via WhatsApp
-          await sendWhatsAppMessage(phoneNumberId, patientPhone, result.reply);
+          await sendWhatsAppMessage(phoneNumberId, patientPhone, finalReply);
 
           // Emit real-time event to clinic dashboard via Socket.io
           io.to(`clinic:${clinic.id}`).emit('conversation:updated', {
