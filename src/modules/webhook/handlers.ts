@@ -114,7 +114,18 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           const lastActivity = conversation.lastMessageAt;
           const sessionExpired = lastActivity && lastActivity < twoHoursAgo;
 
-          if (['COMPLETE', 'IDLE'].includes(currentState.state) || sessionExpired) {
+          // Reset if: session complete/idle, expired, OR if the
+          // patient explicitly sends a greeting/restart on a
+          // non-fresh conversation (they want to start over)
+          const isGreeting = /^(hi|hello|hey|restart|start over|menu)$/i
+            .test(messageText.trim());
+          const hasStaleData = Object.keys(currentState.data).length > 0;
+
+          if (
+            ['COMPLETE', 'IDLE'].includes(currentState.state) ||
+            sessionExpired ||
+            (isGreeting && hasStaleData)
+          ) {
             currentState.data = {};
             currentState.history = [];
             currentState.state = 'START';
@@ -267,8 +278,37 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
 
             // If this was an appointment booking, create the Appointment record
             if (mergedData.mode === 'appointment' && mergedData.appointmentDate && mergedData.appointmentTime) {
-              const scheduledAt = new Date(`${mergedData.appointmentDate} ${mergedData.appointmentTime}`);
-              if (!isNaN(scheduledAt.getTime())) {
+              // Parse date string — handle formats like "13th July 2026",
+              // "July 13", "tomorrow", "Monday", ISO strings
+              function parseAppointmentDateTime(
+                dateStr: string,
+                timeStr: string
+              ): Date | null {
+                try {
+                  // Clean ordinal suffixes: "13th" → "13", "1st" → "1"
+                  const cleanDate = dateStr.replace(/(\d+)(st|nd|rd|th)/gi, '$1');
+                  // Normalize time: "2pm" → "14:00", "2:30pm" → "14:30"
+                  const cleanTime = timeStr
+                    .replace(/(\d+):?(\d*)\s*(am|pm)/i, (_, h, m, period) => {
+                      let hour = parseInt(h);
+                      const min = m ? parseInt(m) : 0;
+                      if (period.toLowerCase() === 'pm' && hour < 12) hour += 12;
+                      if (period.toLowerCase() === 'am' && hour === 12) hour = 0;
+                      return `${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+                    });
+                  const combined = `${cleanDate} ${cleanTime}`;
+                  const parsed = new Date(combined);
+                  if (!isNaN(parsed.getTime())) return parsed;
+                  return null;
+                } catch { return null; }
+              }
+
+              const scheduledAt = parseAppointmentDateTime(
+                mergedData.appointmentDate as string,
+                mergedData.appointmentTime as string
+              );
+
+              if (scheduledAt) {
                 await bookAppointmentFromWhatsApp(
                   clinic.id,
                   patientPhone,
