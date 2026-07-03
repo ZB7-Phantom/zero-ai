@@ -120,8 +120,24 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             currentState.state = 'START';
           }
 
-          // Run the AI brain
-          const result = await processMessage(messageText, currentState, clinic);
+          // Determine if this message is likely to complete intake
+          // so we can pre-assign a queue number for the confirmation message
+          const isWalkinAboutToComplete =
+            currentState.state === 'COLLECTING_SYMPTOMS' &&
+            ((currentState.data as any).followUpCount || 0) >= 1 &&
+            currentState.data.mode === 'walkin';
+
+          let preAssignedQueueNumber: number | undefined;
+          if (isWalkinAboutToComplete) {
+            preAssignedQueueNumber = await assignQueueNumber(clinic.id);
+          }
+
+          const result = await processMessage(
+            messageText,
+            currentState,
+            clinic,
+            preAssignedQueueNumber
+          );
 
           // Merge newly extracted fields into existing collected data
           const updatedData = {
@@ -197,8 +213,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           // If intake is complete, upsert the patient record
           if (result.isComplete && updatedData.name) {
             // Before the upsert, get the next queue number
-            const queueNumber = await assignQueueNumber(clinic.id);
-            finalReply = finalReply.replace('QUEUE_NUMBER', String(queueNumber));
+            const queueNumber = preAssignedQueueNumber || await assignQueueNumber(clinic.id);
 
             const department = (result as any)._department;
             const urgency = (result as any)._urgency;

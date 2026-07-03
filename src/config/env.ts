@@ -10,7 +10,7 @@ const schema = z.object({
   REDIS_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32),
   JWT_EXPIRES_IN: z.string().default('7d'),
-  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_API_KEY: z.string().min(1),
   META_ACCESS_TOKEN: z.string().min(1),
   META_VERIFY_TOKEN: z.string().min(1),
   META_APP_SECRET: z.string().min(1),

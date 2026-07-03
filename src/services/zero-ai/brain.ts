@@ -1,22 +1,26 @@
 /**
- * Zero Deterministic Brain v1.0
+ * Zero Hybrid Brain v2.0
  *
- * A fully deterministic conversation engine for patient intake.
- * No LLM dependencies. Processes every message through six layers:
- * normalise → classify intent → extract entities → detect escalation
- * → advance state machine → select response.
+ * Architecture:
+ *   Layer 1 — Normaliser: cleans raw WhatsApp input
+ *   Layer 2 — Intent classifier: deterministic, pattern-based
+ *   Layer 3 — Escalation detector: deterministic, keyword-based
+ *   Layer 4 — State machine: deterministic, owns all flow decisions
+ *   Layer 5 — Gemini: extracts entities + generates the reply text
+ *   Layer 6 — Fallback: deterministic reply if Gemini fails
  *
- * Design principle: Zero should feel warm and human while being
- * completely predictable and reliable. Responses are pre-written
- * in Zero's voice and selected by state — never generated.
- *
- * When genuinely stuck (patient sends unrecognisable input twice
- * in a row), Zero escalates to staff rather than looping forever.
+ * Gemini is a text generation and extraction tool here.
+ * It cannot change state, trigger escalation, or complete intake.
+ * All of those decisions are made before Gemini is called.
  */
 
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Clinic } from '@prisma/client';
 import { AiConversationState } from '../../types';
+import { env } from '../../config/env';
 import { logger } from '../../config/logger';
+
+const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY!);
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -30,17 +34,17 @@ export interface BrainResult {
   urgency?: string;
 }
 
-interface IntakeData {
+export interface IntakeData {
   name: string;
+  firstName: string;
   age: number;
   gender: string;
   complaint: string;
   symptoms: string;
+  followUpCount: number;
   appointmentDate: string;
   appointmentTime: string;
   mode: 'walkin' | 'appointment' | 'onmyway' | 'queue_check';
-  firstName?: string;
-  followUpCount?: number;
 }
 
 type Intent =
@@ -57,419 +61,101 @@ type Intent =
 
 // ─── LAYER 1: NORMALISER ──────────────────────────────────────────────────────
 
-/**
- * Cleans raw WhatsApp input before any processing.
- * Handles common WhatsApp artifacts: emoji, excessive punctuation,
- * voice-to-text artifacts, and inconsistent casing.
- */
 function normalise(raw: string): string {
   return raw
     .trim()
     .toLowerCase()
-    // Strip emoji — they carry no intake data
-    .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
-    // Collapse multiple spaces
+    .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}]/gu, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
 // ─── LAYER 2: INTENT CLASSIFIER ───────────────────────────────────────────────
 
-/**
- * Classifies the patient's intent from their message.
- * Uses pattern matching on normalised input — ordered from most
- * specific to most general so specific patterns win over generic ones.
- *
- * "providing data" is the default for mid-conversation messages
- * where the patient is answering Zero's last question.
- */
 function classifyIntent(text: string, state: AiConversationState): Intent {
-  // Check menu selections first — these are unambiguous
+  // Escalation first — highest priority
+  if (matchesAny(text, ESCALATION_PATTERNS)) return 'ESCALATION_TRIGGER';
+
+  // Explicit commands
+  if (matchesAny(text, RESTART_PATTERNS)) return 'RESTART';
+  if (matchesAny(text, CANCEL_PATTERNS)) return 'CANCEL';
+  if (matchesAny(text, QUEUE_CHECK_PATTERNS)) return 'QUEUE_CHECK';
+
+  // Number selections — handle before anything else at menu states
   if (['START', 'MENU', 'IDLE'].includes(state.state)) {
     if (/^[1１]$/.test(text.trim())) return 'WALKIN';
     if (/^[2２]$/.test(text.trim())) return 'APPOINTMENT';
     if (/^[3３]$/.test(text.trim())) return 'ON_MY_WAY';
     if (/^[4４]$/.test(text.trim())) return 'QUEUE_CHECK';
-  }
-
-  // Escalation triggers — checked first, highest priority
-  if (matchesAny(text, ESCALATION_PATTERNS)) return 'ESCALATION_TRIGGER';
-
-  // Explicit menu selections or restart commands
-  if (matchesAny(text, RESTART_PATTERNS)) return 'RESTART';
-  if (matchesAny(text, CANCEL_PATTERNS)) return 'CANCEL';
-
-  // Queue check — patient wants to know their number
-  if (matchesAny(text, QUEUE_CHECK_PATTERNS)) return 'QUEUE_CHECK';
-
-  // Mode selection — only classify these as intents at START/MENU state
-  if (['START', 'MENU'].includes(state.state)) {
     if (matchesAny(text, WALKIN_PATTERNS)) return 'WALKIN';
     if (matchesAny(text, APPOINTMENT_PATTERNS)) return 'APPOINTMENT';
     if (matchesAny(text, ON_MY_WAY_PATTERNS)) return 'ON_MY_WAY';
-    // Greeting at start — show menu
     if (matchesAny(text, GREETING_PATTERNS)) return 'GREETING';
   }
 
-  // Mid-conversation — patient is providing intake data
+  // Mid-conversation — patient is providing data
   if (!['START', 'MENU', 'IDLE', 'COMPLETE'].includes(state.state)) {
     return 'PROVIDING_DATA';
   }
 
-  // Fallback — greeting or unknown at menu state
   if (matchesAny(text, GREETING_PATTERNS)) return 'GREETING';
   return 'UNKNOWN';
 }
 
-// ─── INTENT PATTERN LISTS ─────────────────────────────────────────────────────
-
 const GREETING_PATTERNS = [
-  /^(hi|hello|hey|good morning|good afternoon|good evening|hiya|howdy|yo|sup)[\s!.,]*$/,
-  /^(hi there|hello there|hey there)[\s!.,]*$/,
+  /^(hi|hello|hey|good\s*(morning|afternoon|evening)|hiya|yo)[\s!.,]*$/,
 ];
-
 const WALKIN_PATTERNS = [
-  /\b(walk.?in|walk in|queue|join queue|register|sign up|check in|i('m| am) here|i want to see|i need to see|i('d| would) like to see)\b/,
-  /^(1|one)[\s.]*$/,
+  /\b(walk.?in|join queue|register|check in|i('m| am) here|i want to see|i need to see)\b/,
 ];
-
 const APPOINTMENT_PATTERNS = [
-  /\b(book|appointment|schedule|reserve|fix a date|set up|i('d| would) like to book)\b/,
-  /^(2|two)[\s.]*$/,
+  /\b(book|appointment|schedule|reserve|i('d| would) like to book)\b/,
 ];
-
 const ON_MY_WAY_PATTERNS = [
-  /\b(on my way|omw|coming|heading|leaving|en route|almost there|i('m| am) coming)\b/,
-  /^(3|three)[\s.]*$/,
+  /\b(on my way|omw|coming|heading|leaving|en route|almost there)\b/,
 ];
-
 const QUEUE_CHECK_PATTERNS = [
-  /\b(queue|my (number|turn|position)|how long|when (is it|will it be) my turn|what('s| is) my (number|queue))\b/,
-  /^(4|four)[\s.]*$/,
+  /\b(queue|my (number|turn|position)|how long|when.*my turn)\b/,
 ];
-
-const RESTART_PATTERNS = [
-  /^(restart|start over|reset|menu|main menu|back|go back)[\s.]*$/,
-];
-
-const CANCEL_PATTERNS = [
-  /\b(cancel|i don't want|never mind|nevermind|forget it|stop)\b/,
-];
-
-// Escalation — medical emergencies, distress, billing, anger
+const RESTART_PATTERNS = [/^(restart|start over|reset|menu|main menu)[\s.]*$/];
+const CANCEL_PATTERNS = [/\b(cancel|never mind|forget it|stop)\b/];
 const ESCALATION_PATTERNS = [
-  // Medical emergency keywords
-  /\b(chest (pain|tightness|pressure)|heart (pain|pains|attack)|can't breathe|difficulty breathing|shortness of breath)\b/,
-  /\b(coughing (with|and) (blood|pain|heart|chest))\b/,
-  /\b(heart attack|stroke|unconscious|collapse|seizure|severe bleeding|emergency)\b/,
-  /\b(can't (walk|move|feel)|paralysed|passed out|blacked out)\b/,
-  // High distress
-  /\b(this is (ridiculous|unacceptable)|i (want to|will) sue|i'm (furious|disgusted|livid))\b/,
-  /\b(worst (clinic|service|place)|absolute (joke|disgrace))\b/,
-  // Billing complexity
-  /\b(insurance|hmo|nhis|i (won't|refuse to) pay|billing (error|issue|dispute))\b/,
+  /\b(chest (pain|tightness|pressure)|heart (pain|attack)|can't breathe|difficulty breathing)\b/,
+  /\b(stroke|unconscious|collapse|seizure|severe bleeding|emergency)\b/,
+  /\b(coughing (with|and) (blood|heart|chest pain))\b/,
+  /\b(i (want to|will) sue|i'm (furious|livid|disgusted)|worst (clinic|service))\b/,
+  /\b(insurance|hmo|nhis|billing (error|dispute)|refuse to pay)\b/,
 ];
 
-// ─── LAYER 3: ENTITY EXTRACTOR ────────────────────────────────────────────────
+// ─── LAYER 3: ESCALATION DETECTOR ─────────────────────────────────────────────
 
-/**
- * Extracts intake fields from freeform patient messages.
- *
- * Handles common WhatsApp patterns:
- * - Single-field answers: "John", "34", "male", "headache"
- * - Multi-field answers: "I'm John, 34, male" (handled on name + age + gender pass)
- * - Natural language: "I've been having a terrible headache since yesterday"
- *
- * Returns only fields that were actually found — never guesses.
- */
-function extractEntities(
-  text: string,
-  currentState: string,
-  collectedData: Partial<IntakeData>
-): Partial<IntakeData> {
-  // Do not extract any intake data from the first message
-  // in a fresh session — greetings contain no real data
-  if (currentState === 'START' || currentState === 'MENU') {
-    return {};
-  }
-
-  const extracted: Partial<IntakeData> = {};
-  const raw = text; // Keep original case for name extraction
-  const norm = normalise(text);
-
-  // NAME — only extract if not already collected
-  if (!collectedData.name) {
-    const name = extractName(raw, norm);
-    if (name) {
-      extracted.name = name;
-      (extracted as any).firstName = extractFirstName(name);
-    }
-  }
-
-  // AGE — extract if not collected
-  if (!collectedData.age) {
-    const age = extractAge(norm);
-    if (age) extracted.age = age;
-  }
-
-  // GENDER — extract if not collected
-  if (!collectedData.gender) {
-    const gender = extractGender(norm);
-    if (gender) extracted.gender = gender;
-  }
-
-  // COMPLAINT — extract if not collected and we're in right state
-  if (!collectedData.complaint && collectedData.name) {
-    const complaint = extractComplaint(norm);
-    if (complaint) extracted.complaint = complaint;
-  }
-
-  // SYMPTOMS — only after complaint is collected
-  if (collectedData.complaint && !collectedData.symptoms) {
-    const symptoms = extractSymptoms(norm, collectedData.complaint);
-    if (symptoms) extracted.symptoms = symptoms;
-  }
-
-  if (collectedData.complaint && collectedData.symptoms !== undefined) {
-    const current = (collectedData as any).followUpCount || 0;
-    const symptoms = extractSymptoms(norm, collectedData.complaint);
-    if (symptoms) {
-      (extracted as any).followUpCount = current + 1;
-    }
-  }
-
-  // APPOINTMENT DATE
-  if (!collectedData.appointmentDate && collectedData.mode === 'appointment') {
-    const date = extractDate(norm);
-    if (date) extracted.appointmentDate = date;
-  }
-
-  // APPOINTMENT TIME
-  if (collectedData.appointmentDate && !collectedData.appointmentTime) {
-    const time = extractTime(norm);
-    if (time) extracted.appointmentTime = time;
-  }
-
-  return extracted;
-}
-
-export function extractFirstName(fullName: string): string {
-  const HONORIFICS = new Set(['mr','mrs','miss','ms','dr','prof','rev','chief','barr','engr','arc']);
-
-  const parts = fullName.trim().split(/\s+/);
-  if (parts.length === 0) return fullName;
-
-  const firstLower = parts[0].replace('.','').toLowerCase();
-
-  // If first word is an honorific, address as "Honorific LastName"
-  if (HONORIFICS.has(firstLower)) {
-    const honorific = parts[0].replace('.','') + '.';
-    const lastName = parts[parts.length - 1];
-    return `${honorific} ${lastName}`;
-  }
-
-  // Otherwise just use the first name
-  return parts[0];
-}
-
-function extractName(raw: string, norm: string): string | null {
-  // "my name is X" / "I am X" / "I'm X" / "call me X"
-  const explicit = raw.match(
-    /(?:my name is|i am|i'm|call me|name[:\s]+)\s*([A-Z][a-z]+(?: [A-Z][a-z]+)*)/i
-  );
-  if (explicit) return explicit[1].trim();
-
-  // Comma-separated intro: "John, 34, male" — first token is name
-  const parts = raw.split(',').map((s) => s.trim());
-  if (parts.length >= 2 && /^[A-Z][a-z]+(?: [A-Z][a-z]+)*$/.test(parts[0])) {
-    return parts[0];
-  }
-
-  // Only accept a single word as a name if it's not a known
-  // common word — greetings, genders, and menu words excluded
-  const EXCLUDED_WORDS = new Set([
-    'hi','hello','hey','yes','no','male','female','okay','ok',
-    'sure','fine','good','great','thanks','thank','please',
-    'morning','afternoon','evening','zero','doctor','clinic'
-  ]);
-  const trimmed = raw.trim();
-  if (
-    /^[A-Z][a-z]+(?: [A-Z][a-z]+)*$/.test(trimmed) &&
-    !/\d/.test(trimmed) &&
-    !EXCLUDED_WORDS.has(trimmed.toLowerCase())
-  ) {
-    return trimmed;
-  }
-
-  return null;
-}
-
-function extractAge(norm: string): number | null {
-  // "I am 34" / "34 years old" / "age 34" / just "34"
-  const patterns = [
-    /\b(?:i am|i'm|age[:\s]+|aged?)\s*(\d{1,3})\b/,
-    /\b(\d{1,3})\s*(?:years? old|yrs? old|y\.?o\.?)\b/,
-    /^(\d{1,3})$/,
-  ];
-  for (const p of patterns) {
-    const m = norm.match(p);
-    if (m) {
-      const age = parseInt(m[1]);
-      if (age >= 1 && age <= 120) return age;
-    }
-  }
-  return null;
-}
-
-function extractGender(norm: string): string | null {
-  if (/\b(male|man|boy|m)\b/.test(norm)) return 'Male';
-  if (/\b(female|woman|girl|lady|f)\b/.test(norm)) return 'Female';
-  if (/\b(prefer not|rather not|skip|other|non.?binary)\b/.test(norm)) return 'Prefer not to say';
-  // Single letter responses
-  if (/^m$/.test(norm.trim())) return 'Male';
-  if (/^f$/.test(norm.trim())) return 'Female';
-  return null;
-}
-
-function extractComplaint(norm: string): string | null {
-  // Strip common filler phrases to get the core complaint
-  const cleaned = norm
-    .replace(/\b(i have|i've got|i('m| am) having|i('m| am) experiencing|i('m| am) suffering from|i came (in |here )?for|i need help with|it('s| is) my)\b/g, '')
-    .replace(/\b(a bit of|some|quite a bit of|very bad|terrible|awful)\b/g, '')
-    .trim();
-
-  const COMPLAINT_EXCLUDED = new Set([
-    'male','female','prefer','not','say','yes','no','okay',
-    'ok','sure','fine','good','great','m','f'
-  ]);
-
-  // Reject if the entire cleaned string is an excluded word
-  if (COMPLAINT_EXCLUDED.has(cleaned.toLowerCase())) return null;
-
-  // Must be at least 3 characters and not a pure number
-  if (cleaned.length >= 3 && !/^\d+$/.test(cleaned)) {
-    // Capitalise first letter
-    return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-  }
-  return null;
-}
-
-function extractSymptoms(norm: string, complaint: string): string | null {
-  // Any substantive message after complaint is collected = symptoms description
-  // Minimum 5 words to avoid yes/no answers being saved as symptoms
-  const words = norm.split(' ').filter(Boolean);
-  if (words.length >= 5) {
-    return norm.charAt(0).toUpperCase() + norm.slice(1);
-  }
-  // Short but specific — "since yesterday" / "for 3 days" counts
-  if (/\b(since|for \d+|started|began|worse|better|constant|sharp|dull|throbbing)\b/.test(norm)) {
-    return norm.charAt(0).toUpperCase() + norm.slice(1);
-  }
-  return null;
-}
-
-function extractDate(norm: string): string | null {
-  // Tomorrow
-  if (/\b(tomorrow)\b/.test(norm)) {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().split('T')[0];
-  }
-  // Day names: "Monday", "next Monday"
-  const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
-  for (let i = 0; i < days.length; i++) {
-    if (norm.includes(days[i])) {
-      const today = new Date().getDay();
-      let diff = i - today;
-      if (diff <= 0) diff += 7;
-      const d = new Date();
-      d.setDate(d.getDate() + diff);
-      return d.toISOString().split('T')[0];
-    }
-  }
-  // DD/MM or DD-MM or "15th" / "the 15th"
-  const dateMatch = norm.match(/\b(\d{1,2})[\/\-](\d{1,2})\b/) ||
-                    norm.match(/\b(\d{1,2})(?:st|nd|rd|th)?\b/);
-  if (dateMatch) {
-    const day = parseInt(dateMatch[1]);
-    const month = dateMatch[2] ? parseInt(dateMatch[2]) - 1 : new Date().getMonth();
-    if (day >= 1 && day <= 31) {
-      const d = new Date();
-      d.setDate(day);
-      d.setMonth(month);
-      return d.toISOString().split('T')[0];
-    }
-  }
-  return null;
-}
-
-function extractTime(norm: string): string | null {
-  // "10am", "10:30am", "10:30", "10 am", "morning", "afternoon"
-  const timeMatch = norm.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/);
-  if (timeMatch) {
-    let hour = parseInt(timeMatch[1]);
-    const min = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
-    const period = timeMatch[3];
-    if (period === 'pm' && hour < 12) hour += 12;
-    if (period === 'am' && hour === 12) hour = 0;
-    if (hour >= 0 && hour <= 23) {
-      return `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
-    }
-  }
-  if (/\b(morning)\b/.test(norm)) return '09:00';
-  if (/\b(afternoon)\b/.test(norm)) return '14:00';
-  if (/\b(evening)\b/.test(norm)) return '17:00';
-  return null;
-}
-
-// ─── LAYER 4: ESCALATION DETECTOR ─────────────────────────────────────────────
-
-/**
- * Detects escalation triggers from intent and message content.
- * Returns the escalation reason string matching our EscalationReason enum,
- * or null if no escalation is needed.
- */
 function detectEscalation(
   intent: Intent,
   norm: string
 ): { escalate: boolean; reason: string | null } {
-  if (intent === 'ESCALATION_TRIGGER') {
-    // Determine which type
-    if (/\b(chest|breathe|breathing|heart|stroke|seizure|collapse|emergency|bleeding)\b/.test(norm)) {
-      return { escalate: true, reason: 'URGENT_MEDICAL' };
-    }
-    if (/\b(insurance|hmo|nhis|pay|billing|invoice)\b/.test(norm)) {
-      return { escalate: true, reason: 'BILLING_DISPUTE' };
-    }
-    if (/\b(ridiculous|unacceptable|sue|furious|disgusted|worst|disgrace|livid)\b/.test(norm)) {
-      return { escalate: true, reason: 'PATIENT_ANGRY' };
-    }
-    return { escalate: true, reason: 'MANUAL' };
+  if (intent !== 'ESCALATION_TRIGGER') return { escalate: false, reason: null };
+
+  if (/\b(chest|heart|breathe|stroke|seizure|collapse|bleeding|emergency)\b/.test(norm)) {
+    return { escalate: true, reason: 'URGENT_MEDICAL' };
   }
-  return { escalate: false, reason: null };
+  if (/\b(insurance|hmo|nhis|pay|billing)\b/.test(norm)) {
+    return { escalate: true, reason: 'BILLING_DISPUTE' };
+  }
+  if (/\b(sue|furious|livid|disgusted|worst)\b/.test(norm)) {
+    return { escalate: true, reason: 'PATIENT_ANGRY' };
+  }
+  return { escalate: true, reason: 'MANUAL' };
 }
 
-// ─── LAYER 5: STATE MACHINE ───────────────────────────────────────────────────
+// ─── LAYER 4: STATE MACHINE ───────────────────────────────────────────────────
 
-/**
- * Determines the next conversation state based on current state,
- * intent, and what data has been collected so far.
- *
- * States:
- *   START → MENU (on any first message)
- *   MENU → COLLECTING_DETAILS (on mode selection)
- *   COLLECTING_DETAILS → COLLECTING_SYMPTOMS (once name/age/gender/complaint collected)
- *   COLLECTING_SYMPTOMS → COMPLETE (once symptoms collected)
- *   COMPLETE → IDLE (after confirmation sent)
- *   IDLE → MENU (on restart or new session trigger)
- */
-function advanceState(
+export function getNextState(
   currentState: string,
   intent: Intent,
   data: Partial<IntakeData>
 ): string {
   if (intent === 'RESTART') return 'MENU';
-  if (intent === 'QUEUE_CHECK') return currentState; // State doesn't change
+  if (intent === 'QUEUE_CHECK') return currentState;
 
   switch (currentState) {
     case 'START':
@@ -480,38 +166,31 @@ function advanceState(
       if (['WALKIN', 'APPOINTMENT', 'ON_MY_WAY'].includes(intent)) {
         return 'COLLECTING_DETAILS';
       }
-      if (intent === 'GREETING' || intent === 'UNKNOWN') return 'MENU';
-      return currentState;
+      return 'MENU';
 
     case 'COLLECTING_DETAILS':
-      // Advance when name, age, gender, and complaint are all present
       if (data.name && data.age && data.gender && data.complaint) {
         return 'COLLECTING_SYMPTOMS';
       }
       return 'COLLECTING_DETAILS';
 
-    case 'COLLECTING_SYMPTOMS':
-      if (data.symptoms) {
-        const followUpCount = (data as any).followUpCount || 0;
-        if (followUpCount >= 2) {
-          if (data.mode === 'appointment') {
-            if (!data.appointmentDate) return 'COLLECTING_APPOINTMENT_DATE';
-            if (!data.appointmentTime) return 'COLLECTING_APPOINTMENT_TIME';
-          }
-          return 'COMPLETE';
+    case 'COLLECTING_SYMPTOMS': {
+      const followUpCount = data.followUpCount || 0;
+      if (data.symptoms && followUpCount >= 2) {
+        if (data.mode === 'appointment') {
+          if (!data.appointmentDate) return 'COLLECTING_APPOINTMENT_DATE';
+          if (!data.appointmentTime) return 'COLLECTING_APPOINTMENT_TIME';
         }
-        // Stay in COLLECTING_SYMPTOMS for more follow-ups
-        return 'COLLECTING_SYMPTOMS';
+        return 'COMPLETE';
       }
       return 'COLLECTING_SYMPTOMS';
+    }
 
     case 'COLLECTING_APPOINTMENT_DATE':
-      if (data.appointmentDate) return 'COLLECTING_APPOINTMENT_TIME';
-      return 'COLLECTING_APPOINTMENT_DATE';
+      return data.appointmentDate ? 'COLLECTING_APPOINTMENT_TIME' : currentState;
 
     case 'COLLECTING_APPOINTMENT_TIME':
-      if (data.appointmentTime) return 'COMPLETE';
-      return 'COLLECTING_APPOINTMENT_TIME';
+      return data.appointmentTime ? 'COMPLETE' : currentState;
 
     case 'COMPLETE':
       return 'IDLE';
@@ -521,283 +200,353 @@ function advanceState(
   }
 }
 
-// ─── LAYER 6: RESPONSE SELECTOR ───────────────────────────────────────────────
+// ─── LAYER 5A: DEPARTMENT + URGENCY ROUTING ───────────────────────────────────
 
-/**
- * Selects Zero's reply based on next state and what's still missing.
- *
- * Responses are pre-written in Zero's voice — warm, direct, no emoji.
- * Each response is a function so it can reference clinic config and
- * patient data dynamically while remaining fully deterministic.
- *
- * When the same field has been asked for twice with no successful
- * extraction (stubCount >= 2), Zero escalates rather than asking again.
- */
-function routeToDepAndUrgency(data: Partial<IntakeData>): { department: string; urgency: string } {
-  const complaint = (data.complaint || '').toLowerCase();
-  const symptoms = (data.symptoms || '').toLowerCase();
-  const combined = complaint + ' ' + symptoms;
+function routeToDepAndUrgency(data: Partial<IntakeData>): {
+  department: string;
+  urgency: string;
+} {
+  const combined = ((data.complaint || '') + ' ' + (data.symptoms || '')).toLowerCase();
 
-  // Urgency detection
-  const isHighUrgency = /\b(chest pain|heart pain|can't breathe|severe|spreading|sharp.*arm|jaw)\b/.test(combined);
-  const isMediumUrgency = /\b(fever|vomit|blood|fracture|broken|unconscious)\b/.test(combined);
-  const urgency = isHighUrgency ? 'HIGH' : isMediumUrgency ? 'MEDIUM' : 'LOW';
+  const urgency = /\b(chest pain|heart pain|can't breathe|severe|spreading to arm|jaw|unconscious)\b/.test(combined)
+    ? 'HIGH'
+    : /\b(fever|vomiting|blood|fracture|broken)\b/.test(combined)
+    ? 'MEDIUM'
+    : 'LOW';
 
-  // Department routing
   let department = 'General';
-  if (/\b(chest|heart|cardiac|palpitation|cardio)\b/.test(combined)) department = 'Cardiology';
-  else if (/\b(tooth|teeth|dental|gum|jaw|brace)\b/.test(combined)) department = 'Dental';
-  else if (/\b(head|migraine|neuro|seizure|memory|stroke)\b/.test(combined)) department = 'Neurology';
-  else if (/\b(skin|rash|acne|itch|derma)\b/.test(combined)) department = 'Dermatology';
+  if (/\b(chest|heart|cardiac|cardio|palpitation)\b/.test(combined)) department = 'Cardiology';
+  else if (/\b(tooth|teeth|dental|gum|jaw|brace|orthodon)\b/.test(combined)) department = 'Dental';
+  else if (/\b(head|migraine|neuro|seizure|memory|stroke|nerve)\b/.test(combined)) department = 'Neurology';
+  else if (/\b(skin|rash|acne|itch|derma|eczema)\b/.test(combined)) department = 'Dermatology';
   else if (/\b(physio|joint|muscle|back|knee|shoulder|spine)\b/.test(combined)) department = 'Physiotherapy';
-  else if (/\b(eye|vision|ear|hearing|nose|throat|ent)\b/.test(combined)) department = 'ENT';
-  else if (/\b(lab|test|blood test|urine|sample)\b/.test(combined)) department = 'Laboratory';
+  else if (/\b(eye|vision|ear|hearing|nose|throat|ent|sinus)\b/.test(combined)) department = 'ENT';
+  else if (/\b(stomach|abdomen|nausea|vomit|diarrhea|digest|bowel)\b/.test(combined)) department = 'Gastroenterology';
+  else if (/\b(lab|test|blood test|urine|sample|check.?up)\b/.test(combined)) department = 'Laboratory';
 
   return { department, urgency };
 }
 
-function selectResponse(
+// ─── FIRST NAME EXTRACTION ────────────────────────────────────────────────────
+
+function extractFirstName(fullName: string): string {
+  const HONORIFICS = new Set(['mr','mrs','miss','ms','dr','prof','rev','chief','barr','engr','arc']);
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length === 0) return fullName;
+  const firstLower = parts[0].replace('.', '').toLowerCase();
+  if (HONORIFICS.has(firstLower)) {
+    return `${parts[0].replace('.', '')}.${parts.length > 1 ? ' ' + parts[parts.length - 1] : ''}`;
+  }
+  return parts[0];
+}
+
+// ─── LAYER 5B: GEMINI — ENTITY EXTRACTION + REPLY GENERATION ─────────────────
+
+/**
+ * Calls Gemini with a tightly scoped prompt.
+ * Gemini's only job: extract data fields and write a warm reply.
+ * The state, next question, and completion logic are decided before
+ * this call and passed in as instructions — Gemini cannot override them.
+ */
+async function callGemini(
+  message: string,
+  history: { role: 'user' | 'model'; content: string }[],
+  instruction: string,
+  clinic: Clinic
+): Promise<{ reply: string; extracted: Partial<IntakeData> }> {
+  const systemPrompt = `You are Zero, a warm and professional AI clinic assistant for ${clinic.name}.
+
+Your ONLY jobs in this message:
+1. Extract any patient data fields present in the message
+2. Write the reply specified in the INSTRUCTION below
+
+STRICT RULES:
+- Follow the INSTRUCTION exactly — do not deviate from what it asks
+- Be warm, empathetic, and professional
+- Use the patient's first name if known — never repeat it excessively
+- Format for WhatsApp: use *bold* for emphasis, keep messages concise
+- Never ask for information already collected
+- Never invent symptoms or data the patient did not provide
+- No emoji unless the instruction specifies them
+
+RESPOND ONLY WITH THIS JSON — no markdown, no explanation:
+{
+  "reply": "your WhatsApp message",
+  "extracted": {
+    "name": null,
+    "age": null,
+    "gender": null,
+    "complaint": null,
+    "symptoms": null,
+    "appointmentDate": null,
+    "appointmentTime": null
+  }
+}
+Only include extracted fields you actually found. Never guess.`;
+
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.0-flash',
+    systemInstruction: systemPrompt,
+    generationConfig: {
+      responseMimeType: 'application/json',
+      temperature: 0.4,
+      maxOutputTokens: 400,
+    },
+  });
+
+  // Last 6 turns of history for context
+  const contents = [
+    ...history.slice(-6).map((h) => ({
+      role: h.role as 'user' | 'model',
+      parts: [{ text: h.content }],
+    })),
+    {
+      role: 'user' as const,
+      parts: [{ text: `INSTRUCTION: ${instruction}\n\nPATIENT MESSAGE: ${message}` }],
+    },
+  ];
+
+  const result = await model.generateContent({ contents });
+  const raw = result.response
+    .text()
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/```\s*$/i, '')
+    .trim();
+
+  const parsed = JSON.parse(raw);
+
+  // Clean extracted — remove nulls, coerce age to number
+  const extracted: Partial<IntakeData> = {};
+  for (const [key, val] of Object.entries(parsed.extracted || {})) {
+    if (val !== null && val !== undefined && val !== '') {
+      if (key === 'age') {
+        const n = parseInt(String(val));
+        if (!isNaN(n) && n > 0 && n < 120) (extracted as any)[key] = n;
+      } else {
+        (extracted as any)[key] = val;
+      }
+    }
+  }
+
+  // Derive firstName if name was just extracted
+  if (extracted.name && !extracted.firstName) {
+    (extracted as any).firstName = extractFirstName(extracted.name as string);
+  }
+
+  return { reply: parsed.reply || '', extracted };
+}
+
+// ─── LAYER 6: DETERMINISTIC FALLBACK ─────────────────────────────────────────
+
+/**
+ * Used when Gemini fails. Keeps Zero alive and the conversation moving.
+ * Not as warm as Gemini but never wrong about what to ask next.
+ */
+function fallbackReply(
   nextState: string,
-  intent: Intent,
   data: Partial<IntakeData>,
-  clinic: Clinic,
-  stubCount: number
-): { reply: string; shouldEscalate?: boolean; _department?: string; _urgency?: string } {
-
-  if (stubCount >= 2) {
-    return {
-      reply: `I'm having a little trouble understanding — let me connect you with a member of our team who can help directly. 🙏`,
-      shouldEscalate: true,
-    };
-  }
-
-  if (intent === 'QUEUE_CHECK') {
-    return {
-      reply: data.name
-        ? `I can see you're registered, ${(data as any).firstName || data.name}. The clinic team will call you when it's your turn. Please hold on. 🙏`
-        : `You'll need to register first before I can check your queue position.\n\nWould you like to do that now?`,
-    };
-  }
-
-  if (intent === 'CANCEL') {
-    return {
-      reply: `No problem at all. If you need anything else, just send a message and I'll be right here. 😊`,
-    };
-  }
-
+  clinic: Clinic
+): string {
   const firstName = (data as any).firstName || data.name || 'there';
-  const clinicName = clinic.name;
 
   switch (nextState) {
     case 'MENU':
-      return {
-        reply: `Hello! Welcome to *${clinicName}*. I'm *Zero*, your AI clinic assistant. 👋\n\nHow can I help you today?\n\n1️⃣ Walk-in — join today's queue\n2️⃣ Book an appointment\n3️⃣ I'm on my way to the clinic\n4️⃣ Check my queue number`,
-      };
-
+      return `Hello! Welcome to *${clinic.name}*. I'm *Zero*, your AI clinic assistant. 👋\n\nHow can I help you today?\n\n1️⃣ Walk-in — join today's queue\n2️⃣ Book an appointment\n3️⃣ I'm on my way to the clinic\n4️⃣ Check my queue number`;
     case 'COLLECTING_DETAILS':
-      if (!data.name) {
-        return { reply: `I'll get you sorted quickly. 😊\n\nWhat's your *full name*?` };
-      }
-      if (!data.age) {
-        return { reply: `Thanks *${firstName}*. How old are you?` };
-      }
-      if (!data.gender) {
-        return { reply: `And your gender — *Male*, *Female*, or *Prefer not to say*?` };
-      }
-      if (!data.complaint) {
-        return {
-          reply: `Okay ${firstName}, what brings you to *${clinicName}* today?`,
-        };
-      }
-      return {
-        reply: `Understood. Can you tell me a bit more about what you're experiencing?`,
-      };
-
-    case 'COLLECTING_SYMPTOMS': {
-      const complaint = (data.complaint || '').toLowerCase();
-      const followUpCount = (data as any).followUpCount || 0;
-
-      // First follow-up — medically specific question
-      if (followUpCount === 0 || !data.symptoms) {
-        if (/\b(chest|heart|cardiac|palpitation)\b/.test(complaint)) {
-          return { reply: `I'm sorry to hear that, ${firstName}. 🙏\n\nCan you describe the pain — is it *sharp*, *crushing*, or *pressure-like*? And does it spread to your arm or jaw?` };
-        }
-        if (/\b(cough|breath|wheez|asthma|respiratory)\b/.test(complaint)) {
-          return { reply: `Sorry to hear that. Is the cough *dry* or producing mucus? Any fever or difficulty breathing at rest?` };
-        }
-        if (/\b(head|migraine|dizz)\b/.test(complaint)) {
-          return { reply: `I understand. Where exactly is the pain — front, back, or sides? Does light or noise make it worse?` };
-        }
-        if (/\b(tooth|teeth|dental|gum|brace)\b/.test(complaint)) {
-          return { reply: `Which tooth or area is affected? Is there sharp pain, or sensitivity to hot or cold?` };
-        }
-        if (/\b(back|knee|joint|shoulder|muscle)\b/.test(complaint)) {
-          return { reply: `Which area exactly? Did it start suddenly or gradually, and is there any swelling?` };
-        }
-        if (/\b(stomach|abdomen|nausea|vomit|diarrhea)\b/.test(complaint)) {
-          return { reply: `Where in the abdomen? Is it constant or does it come and go?` };
-        }
-        return { reply: `I'm sorry to hear that. 🙏\n\nHow long have you had this, and how would you rate the severity on a scale of *1 to 10*?` };
-      }
-
-      // Second follow-up — duration/onset if not yet known
-      if (followUpCount === 1) {
-        return { reply: `Thank you for sharing that. How long have you been experiencing this — did it start suddenly or has it been building up over time?` };
-      }
-
-      // Third follow-up — any other symptoms
-      if (followUpCount === 2) {
-        return { reply: `Got it. Are you experiencing any other symptoms alongside this — like fever, fatigue, or anything else unusual?` };
-      }
-
-      return { reply: `Thank you, ${firstName}. I have everything I need.` };
-    }
-
+      if (!data.name) return `What's your *full name*?`;
+      if (!data.age) return `Thanks *${firstName}*. How old are you?`;
+      if (!data.gender) return `And your gender — *Male*, *Female*, or *Prefer not to say*?`;
+      return `What brings you to *${clinic.name}* today, ${firstName}?`;
+    case 'COLLECTING_SYMPTOMS':
+      return `Can you describe your symptoms in more detail — how long have you had this and how severe is it?`;
     case 'COLLECTING_APPOINTMENT_DATE':
-      return {
-        reply: `What date would you like to come in?\n\nYou can say *"tomorrow"*, *"Monday"*, or give a specific date.`,
-      };
-
+      return `What date would you like to come in?`;
     case 'COLLECTING_APPOINTMENT_TIME':
-      return {
-        reply: `What time works best for you?\n\nMorning, afternoon, or a specific time like *10am*?`,
-      };
-
-    case 'COMPLETE': {
-      const { department, urgency } = routeToDepAndUrgency(data);
-      const mode = data.mode;
-      const urgencyEmoji = urgency === 'HIGH' ? '🔴' : urgency === 'MEDIUM' ? '🟡' : '🟢';
-
-      if (mode === 'walkin') {
-        return {
-          reply: `✅ *You're all set, ${data.name}.*\n\n🔢 Queue Number: *#QUEUE_NUMBER*\n🏥 Department: *${department}*\n${urgencyEmoji} Urgency: *${urgency}*\n\nPlease take a seat at reception. I'll message you when it's your turn. 🙏`,
-          _department: department,
-          _urgency: urgency,
-        };
-      }
-      if (mode === 'appointment') {
-        return {
-          reply: `✅ *Appointment request submitted, ${data.name}.*\n\n📅 Date: *${data.appointmentDate}*\n⏰ Time: *${data.appointmentTime}*\n🏥 Service: *${data.complaint}*\n\nThe clinic will confirm your appointment shortly. 🙏`,
-          _department: department,
-          _urgency: urgency,
-        };
-      }
-      if (mode === 'onmyway') {
-        return {
-          reply: `Got it, *${firstName}*. 👍\n\nWe've let *${clinicName}* know you're on your way. See you soon!`,
-          _department: department,
-          _urgency: urgency,
-        };
-      }
-      return {
-        reply: `✅ *You're all set, ${firstName}.*\n\nThe clinic team will be with you shortly. 🙏`,
-        _department: department,
-        _urgency: urgency,
-      };
-    }
-
+      return `What time works best for you?`;
     default:
-      return {
-        reply: `Hello! Welcome to *${clinicName}*. I'm *Zero*, your AI clinic assistant. 👋\n\nHow can I help you today?\n\n1️⃣ Walk-in — join today's queue\n2️⃣ Book an appointment\n3️⃣ I'm on my way to the clinic\n4️⃣ Check my queue number`,
-      };
+      return `Could you say that again? I want to make sure I help you correctly.`;
   }
 }
 
-// ─── UTILITY ──────────────────────────────────────────────────────────────────
+// ─── BUILD GEMINI INSTRUCTION ─────────────────────────────────────────────────
 
-function matchesAny(text: string, patterns: RegExp[]): boolean {
-  return patterns.some((p) => p.test(text));
+/**
+ * Tells Gemini exactly what to do based on the current state
+ * and what data is still missing. Gemini follows this instruction
+ * to generate the reply — it does not decide this itself.
+ */
+function buildInstruction(
+  nextState: string,
+  data: Partial<IntakeData>,
+  clinic: Clinic,
+  isComplete: boolean,
+  queuePlaceholder?: number
+): string {
+  const firstName = (data as any).firstName || data.name || 'the patient';
+  const clinicName = clinic.name;
+
+  if (isComplete) {
+    const { department, urgency } = routeToDepAndUrgency(data);
+    const urgencyEmoji = urgency === 'HIGH' ? '🔴' : urgency === 'MEDIUM' ? '🟡' : '🟢';
+    const mode = data.mode;
+    if (mode === 'walkin') {
+      return `Intake is complete. Confirm registration with this exact format:\n✅ *You're all set, ${data.name}.*\n\n🔢 Queue Number: *#${queuePlaceholder}*\n🏥 Department: *${department}*\n${urgencyEmoji} Urgency: *${urgency}*\n\nPlease take a seat at reception. I'll message you when it's your turn. 🙏\n\nDo not add or change anything. Extract no fields.`;
+    }
+    if (mode === 'appointment') {
+      return `Appointment booked. Confirm with this format:\n✅ *Appointment request submitted, ${data.name}.*\n\n📅 Date: *${data.appointmentDate}*\n⏰ Time: *${data.appointmentTime}*\n🏥 Service: *${data.complaint}*\n\nThe clinic will confirm shortly. 🙏\n\nDo not add or change anything.`;
+    }
+    return `Patient is on their way. Send a warm confirmation that ${clinicName} has been notified and you'll see them soon.`;
+  }
+
+  switch (nextState) {
+    case 'MENU':
+      return `Greet the patient warmly and show the clinic menu with these exact options:\n1️⃣ Walk-in — join today's queue\n2️⃣ Book an appointment\n3️⃣ I'm on my way to the clinic\n4️⃣ Check my queue number\n\nMention the clinic name *${clinicName}* and your name *Zero*.`;
+
+    case 'COLLECTING_DETAILS':
+      if (!data.name) {
+        return `Ask for the patient's full name warmly. Extract their name from this message if present.`;
+      }
+      if (!data.age) {
+        return `Thank the patient by their first name *${firstName}* and ask how old they are. Extract their age from this message if present.`;
+      }
+      if (!data.gender) {
+        return `Ask the patient their gender — Male, Female, or Prefer not to say. Extract gender from this message if present.`;
+      }
+      return `Show empathy and ask what brings ${firstName} to *${clinicName}* today. Extract their complaint from this message if present.`;
+
+    case 'COLLECTING_SYMPTOMS': {
+      const followUpCount = data.followUpCount || 0;
+      const complaint = (data.complaint || '').toLowerCase();
+
+      if (followUpCount === 0 || !data.symptoms) {
+        let medicalFollowUp = `How long have you had this and how severe is it on a scale of 1 to 10?`;
+        if (/\b(chest|heart|cardiac)\b/.test(complaint)) {
+          medicalFollowUp = `Is the pain sharp, crushing, or pressure-like? Does it spread to your arm or jaw?`;
+        } else if (/\b(cough|breath|respiratory)\b/.test(complaint)) {
+          medicalFollowUp = `Is the cough dry or producing mucus? Any fever or difficulty breathing at rest?`;
+        } else if (/\b(head|migraine)\b/.test(complaint)) {
+          medicalFollowUp = `Where exactly is the pain and does light or noise make it worse?`;
+        } else if (/\b(stomach|abdomen|nausea|digest)\b/.test(complaint)) {
+          medicalFollowUp = `Where in the abdomen? Is it constant or does it come and go? Any nausea or changes in appetite?`;
+        } else if (/\b(tooth|dental|gum)\b/.test(complaint)) {
+          medicalFollowUp = `Which area is affected? Any sensitivity to hot or cold, or swelling?`;
+        } else if (/\b(back|knee|joint|muscle)\b/.test(complaint)) {
+          medicalFollowUp = `Which area exactly? Did it start suddenly or gradually?`;
+        }
+        return `Show brief empathy for the patient's complaint. Ask: "${medicalFollowUp}". Extract symptoms from this message if present.`;
+      }
+
+      if (followUpCount === 1) {
+        return `Thank the patient briefly. Ask: "Did this start suddenly or has it been building up gradually?" Extract any symptom details from this message.`;
+      }
+
+      return `Thank the patient. Ask: "Are you experiencing any other symptoms alongside this — like fever, fatigue, or anything else unusual?" Extract any additional symptoms mentioned.`;
+    }
+
+    case 'COLLECTING_APPOINTMENT_DATE':
+      return `Ask the patient what date they would like to come in. Accept formats like "tomorrow", day names, or specific dates. Extract the appointment date from this message if present.`;
+
+    case 'COLLECTING_APPOINTMENT_TIME':
+      return `Ask the patient what time works best. Accept morning/afternoon/evening or specific times. Extract the appointment time from this message if present.`;
+
+    default:
+      return `Respond helpfully to the patient's message.`;
+  }
 }
 
 // ─── MAIN ENTRY POINT ─────────────────────────────────────────────────────────
 
-/**
- * processMessage — the single public function the webhook handler calls.
- *
- * Takes the patient's message, current conversation state, and clinic config.
- * Returns what Zero should say and what was extracted.
- *
- * Entirely synchronous in its logic — no await, no external calls.
- * The async signature is kept for interface compatibility with the
- * webhook handler (which may need to make async calls around this).
- */
 export async function processMessage(
   message: string,
   state: AiConversationState,
-  clinic: Clinic
+  clinic: Clinic,
+  queueNumber?: number
 ): Promise<BrainResult> {
-  logger.info(`Brain state debug — state: ${state.state}, data keys: ${Object.keys(state.data).join(',')}, msg: ${message.slice(0,30)}`);
-
   try {
-    // Track how many consecutive messages failed to extract any data.
-    // Stored in state so it persists across turns.
-    const stubCount = (state as any).stubCount || 0;
-
-    // Layer 1: Normalise
     const norm = normalise(message);
 
-    // Layer 2: Classify intent
+    // Layer 2: Intent
     const intent = classifyIntent(norm, state);
 
-    // Layer 3: Extract entities
-    const extracted = extractEntities(message, state.state, state.data);
-
-    // Layer 4: Detect escalation
+    // Layer 3: Escalation — checked before anything else
     const { escalate, reason } = detectEscalation(intent, norm);
     if (escalate) {
+      // Still try to extract a name from the message for the patient record
+      let escalationExtracted: Partial<IntakeData> = {};
+      try {
+        const { extracted } = await callGemini(
+          message,
+          state.history,
+          `Extract only the patient name from this message if present. Do not reply with anything else.`,
+          clinic
+        );
+        escalationExtracted = extracted;
+      } catch { /* silent — escalation reply doesn't need extraction */ }
+
       return {
-        reply: `This sounds like something our team needs to handle directly. I'm flagging this conversation right now — someone will be with you shortly.`,
-        extracted,
+        reply: `⚠️ *This sounds urgent.* I'm flagging this conversation to our team right now.\n\nSomeone will be with you *immediately*. Please stay on this chat. 🙏`,
+        extracted: escalationExtracted,
         isComplete: false,
         escalate: true,
         escalationReason: reason,
+        urgency: 'HIGH',
+        department: 'General',
       };
     }
 
-    // Merge newly extracted data with existing collected data
-    const mergedData = { ...state.data, ...extracted };
+    // Set mode from intent
+    const modeUpdate: Partial<IntakeData> = {};
+    if (intent === 'WALKIN') modeUpdate.mode = 'walkin';
+    if (intent === 'APPOINTMENT') modeUpdate.mode = 'appointment';
+    if (intent === 'ON_MY_WAY') modeUpdate.mode = 'onmyway';
 
-    // Set mode if intent provides it
-    if (intent === 'WALKIN') mergedData.mode = 'walkin';
-    if (intent === 'APPOINTMENT') mergedData.mode = 'appointment';
-    if (intent === 'ON_MY_WAY') mergedData.mode = 'onmyway';
-
-    // Track stubs — if nothing was extracted and state didn't change
-    const nothingExtracted = Object.keys(extracted).length === 0;
-    const newStubCount = nothingExtracted && state.state === advanceState(state.state, intent, mergedData)
-      ? stubCount + 1
-      : 0;
-
-    // Layer 5: Advance state machine
-    const nextState = advanceState(state.state, intent, mergedData);
+    // Layer 4: Advance state machine with current data
+    // (Gemini may extract more data, but we need the next state to build the instruction)
+    const tentativeData = { ...state.data, ...modeUpdate };
+    const nextState = getNextState(state.state, intent, tentativeData);
     const isComplete = nextState === 'COMPLETE';
 
-    // Layer 6: Select response
-    const { reply, shouldEscalate } = selectResponse(
-      nextState,
-      intent,
-      mergedData,
-      clinic,
-      newStubCount
-    );
+    const { department, urgency } = routeToDepAndUrgency(tentativeData);
 
-    if (shouldEscalate) {
-      return {
-        reply,
-        extracted,
-        isComplete: false,
-        escalate: true,
-        escalationReason: 'MANUAL',
-      };
+    // Build instruction for Gemini based on what state machine decided
+    const instruction = buildInstruction(nextState, tentativeData, clinic, isComplete, queueNumber);
+
+    // Layer 5: Call Gemini for extraction + reply generation
+    let reply: string;
+    let extracted: Partial<IntakeData>;
+
+    try {
+      const geminiResult = await callGemini(message, state.history, instruction, clinic);
+      reply = geminiResult.reply;
+      extracted = { ...modeUpdate, ...geminiResult.extracted };
+
+      // Increment followUpCount when in symptom collection
+      if (nextState === 'COLLECTING_SYMPTOMS' && (extracted.symptoms || state.data.symptoms)) {
+        const current = (tentativeData as any).followUpCount || 0;
+        (extracted as any).followUpCount = current + 1;
+      }
+
+      // Derive firstName if name newly extracted
+      if (extracted.name && !(extracted as any).firstName) {
+        (extracted as any).firstName = extractFirstName(extracted.name as string);
+      }
+
+    } catch (geminiErr) {
+      // Layer 6: Fallback if Gemini fails
+      logger.warn('Gemini call failed — using deterministic fallback', {
+        error: (geminiErr as Error).message,
+        clinicId: clinic.id,
+      });
+      reply = fallbackReply(nextState, tentativeData, clinic);
+      extracted = modeUpdate;
     }
 
-    // Update stubCount in state for next turn
-    (state as any).stubCount = newStubCount;
-
-    logger.info('Brain processed message', {
+    logger.info('Brain processed', {
       clinicId: clinic.id,
       intent,
       nextState,
+      isComplete,
       extractedFields: Object.keys(extracted),
     });
 
@@ -807,12 +556,14 @@ export async function processMessage(
       isComplete,
       escalate: false,
       escalationReason: null,
+      department,
+      urgency,
     };
 
   } catch (err) {
-    logger.error('Brain error', { error: (err as Error).message });
+    logger.error('Brain fatal error', { error: (err as Error).message });
     return {
-      reply: `Sorry, something went wrong on my end. Could you send that again?`,
+      reply: `Sorry, something went wrong. Could you send that again?`,
       extracted: {},
       isComplete: false,
       escalate: false,
@@ -821,13 +572,6 @@ export async function processMessage(
   }
 }
 
-export function getNextState(
-  currentState: string,
-  message: string,
-  mergedData: Partial<any>
-): string {
-  const norm = normalise(message);
-  const stateObj = { state: currentState } as AiConversationState;
-  const intent = classifyIntent(norm, stateObj);
-  return advanceState(currentState, intent, mergedData);
+function matchesAny(text: string, patterns: RegExp[]): boolean {
+  return patterns.some((p) => p.test(text));
 }
