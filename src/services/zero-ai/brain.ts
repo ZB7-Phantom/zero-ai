@@ -155,7 +155,8 @@ const CANCEL_PATTERNS = [
 // Escalation — medical emergencies, distress, billing, anger
 const ESCALATION_PATTERNS = [
   // Medical emergency keywords
-  /\b(chest (pain|tightness|pressure)|can't breathe|difficulty breathing|shortness of breath)\b/,
+  /\b(chest (pain|tightness|pressure)|heart (pain|pains|attack)|can't breathe|difficulty breathing|shortness of breath)\b/,
+  /\b(coughing (with|and) (blood|pain|heart|chest))\b/,
   /\b(heart attack|stroke|unconscious|collapse|seizure|severe bleeding|emergency)\b/,
   /\b(can't (walk|move|feel)|paralysed|passed out|blacked out)\b/,
   // High distress
@@ -182,6 +183,12 @@ function extractEntities(
   currentState: string,
   collectedData: Partial<IntakeData>
 ): Partial<IntakeData> {
+  // Do not extract any intake data from the first message
+  // in a fresh session — greetings contain no real data
+  if (currentState === 'START' || currentState === 'MENU') {
+    return {};
+  }
+
   const extracted: Partial<IntakeData> = {};
   const raw = text; // Keep original case for name extraction
   const norm = normalise(text);
@@ -244,9 +251,20 @@ function extractName(raw: string, norm: string): string | null {
     return parts[0];
   }
 
-  // Single capitalised word/phrase with no numbers — likely just a name
-  if (/^[A-Z][a-z]+(?: [A-Z][a-z]+)*$/.test(raw.trim()) && !/\d/.test(raw)) {
-    return raw.trim();
+  // Only accept a single word as a name if it's not a known
+  // common word — greetings, genders, and menu words excluded
+  const EXCLUDED_WORDS = new Set([
+    'hi','hello','hey','yes','no','male','female','okay','ok',
+    'sure','fine','good','great','thanks','thank','please',
+    'morning','afternoon','evening','zero','doctor','clinic'
+  ]);
+  const trimmed = raw.trim();
+  if (
+    /^[A-Z][a-z]+(?: [A-Z][a-z]+)*$/.test(trimmed) &&
+    !/\d/.test(trimmed) &&
+    !EXCLUDED_WORDS.has(trimmed.toLowerCase())
+  ) {
+    return trimmed;
   }
 
   return null;

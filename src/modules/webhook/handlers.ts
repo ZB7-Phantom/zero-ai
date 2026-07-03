@@ -108,7 +108,13 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
 
           // If previous session was complete or idle, reset data and
           // history so Zero starts the new conversation clean
-          if (['COMPLETE', 'IDLE'].includes(currentState.state)) {
+          // Reset if the last session was complete, idle, or if
+          // the conversation has been inactive for over 2 hours
+          const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+          const lastActivity = conversation.lastMessageAt;
+          const sessionExpired = lastActivity && lastActivity < twoHoursAgo;
+
+          if (['COMPLETE', 'IDLE'].includes(currentState.state) || sessionExpired) {
             currentState.data = {};
             currentState.history = [];
             currentState.state = 'START';
