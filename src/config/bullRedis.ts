@@ -1,15 +1,17 @@
 import Redis from 'ioredis';
 import { env } from './env';
 
-// Bull requires three separate Redis clients: regular, subscriber,
-// and bclient. We create them from the same URL so TLS and auth
-// are always correctly inherited — never spread from redis.options
-// which loses URL-parsed credentials.
-export function createBullClient(type: 'client' | 'subscriber' | 'bclient') {
-  console.log(`createBullClient called — type: ${type}, url prefix: ${process.env.REDIS_URL?.slice(0,20)}`);
+// Bull requires three separate Redis clients per queue instance.
+// We pass the Upstash URL directly — ioredis parses TLS from the
+// rediss:// scheme automatically. Do NOT add a separate tls: {}
+// option when using a URL string — it creates a double-TLS
+// conflict that silently kills the connection before it opens.
+export function createBullClient(
+  type: 'client' | 'subscriber' | 'bclient'
+): Redis {
   return new Redis(env.REDIS_URL, {
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
-    tls: env.REDIS_URL.startsWith('rediss://') ? {} : undefined,
+    // No tls option here — rediss:// URL handles it automatically
   });
 }
