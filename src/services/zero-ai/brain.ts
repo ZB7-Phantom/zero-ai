@@ -576,58 +576,82 @@ export async function processMessage(
 
     const { department, urgency } = routeToDepAndUrgency(tentativeData);
 
-    // Build instruction for Gemini based on what state machine decided
-    const instruction = buildInstruction(nextState, tentativeData, clinic, isComplete, queueNumber);
-
     // Layer 5: Call Gemini for extraction + reply generation
-    let reply: string;
-    let extracted: Partial<IntakeData>;
+    let reply: string = '';
+    let extracted: Partial<IntakeData> = modeUpdate;
+    let mergedData: any = { ...tentativeData };
+    let finalNextState: string = state.state;
+    let finalIsComplete = false;
 
     try {
-      const geminiResult = await callGemini(message, state.history, instruction, clinic);
-      reply = geminiResult.reply;
-      extracted = { ...modeUpdate, ...geminiResult.extracted };
+      // Step 1: Call Gemini with a simple extraction-focused prompt
+      // just to get the data out of this message
+      const extractionPrompt = `Extract any patient data from
+      this message. Fields to look for: name, age, gender,
+      complaint, symptoms, appointmentDate, appointmentTime.
+      Reply with the standard JSON but set reply to empty string.`;
+
+      const { extracted: geminiExtracted } = await callGemini(
+        message, state.history, extractionPrompt, clinic
+      );
+
+      extracted = { ...modeUpdate, ...geminiExtracted };
+
+      // Step 2: Build mergedData with the extraction
+      mergedData = {
+        ...tentativeData,
+        ...Object.fromEntries(
+          Object.entries(extracted).filter(([,v]) => v !== null && v !== undefined)
+        ),
+      };
 
       // Increment followUpCount when in symptom collection
-      if (nextState === 'COLLECTING_SYMPTOMS' && (extracted.symptoms || state.data.symptoms)) {
+      if (nextState === 'COLLECTING_SYMPTOMS' && (mergedData.symptoms || state.data.symptoms)) {
         const current = (tentativeData as any).followUpCount || 0;
+        (mergedData as any).followUpCount = current + 1;
         (extracted as any).followUpCount = current + 1;
       }
 
       // Derive firstName if name newly extracted
-      if (extracted.name && !(extracted as any).firstName) {
-        (extracted as any).firstName = extractFirstName(extracted.name as string);
+      if (mergedData.name && !(mergedData as any).firstName) {
+        (mergedData as any).firstName = extractFirstName(mergedData.name as string);
+        (extracted as any).firstName = extractFirstName(mergedData.name as string);
+      }
+
+      // Step 3: Calculate the real next state
+      finalNextState = getNextState(state.state, intent, mergedData);
+      finalIsComplete = finalNextState === 'COMPLETE';
+
+      // Step 4: Build the instruction for the reply
+      // using mergedData so it knows what's already collected
+      const instruction = buildInstruction(
+        finalNextState, mergedData, clinic,
+        finalIsComplete, queueNumber
+      );
+
+      // Step 5: Call Gemini again just for the reply
+      const { reply: geminiReply } = await callGemini(
+        message, state.history, instruction, clinic
+      );
+
+      if (validateGeminiReply(geminiReply, finalNextState, finalIsComplete)) {
+        reply = geminiReply;
+      } else {
+        logger.warn('Gemini reply failed validation — using fallback', {
+          reply: geminiReply.slice(0, 80),
+          nextState: finalNextState,
+        });
+        reply = fallbackReply(finalNextState, mergedData, clinic);
       }
 
     } catch (geminiErr) {
       // Layer 6: Fallback if Gemini fails
       logger.warn(`Gemini failed: ${(geminiErr as Error).message} | ${(geminiErr as Error).stack?.split('\\n')[1]}`);
-      reply = '';
       extracted = modeUpdate;
-    }
-
-    // After the try/catch, build mergedData
-    const mergedData = {
-      ...tentativeData,
-      ...Object.fromEntries(
-        Object.entries(extracted).filter(([,v]) => v !== null && v !== undefined)
-      ),
-    };
-
-    // Recalculate nextState with full merged data
-    const finalNextState = isComplete
-      ? 'COMPLETE'
-      : getNextState(state.state, intent, mergedData);
-    const finalIsComplete = finalNextState === 'COMPLETE';
-
-    // Validate Gemini reply against finalNextState
-    if (!reply || !validateGeminiReply(reply, finalNextState, finalIsComplete)) {
-      if (reply) {
-        logger.warn('Gemini reply failed validation — using fallback', {
-          reply: reply.slice(0, 80),
-          nextState: finalNextState,
-        });
-      }
+      
+      mergedData = { ...tentativeData, ...extracted };
+      finalNextState = getNextState(state.state, intent, mergedData);
+      finalIsComplete = finalNextState === 'COMPLETE';
       reply = fallbackReply(finalNextState, mergedData, clinic);
     }
 
