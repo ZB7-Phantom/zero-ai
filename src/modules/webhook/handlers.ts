@@ -4,7 +4,7 @@ import { logger } from '../../config/logger';
 import { env } from '../../config/env';
 import { io } from '../../app';
 import { sendWhatsAppMessage } from '../../services/whatsapp/client';
-import { processMessage } from '../../services/zero-ai/brain';
+import { processMessage, getNextState } from '../../services/zero-ai/brain';
 import { AiConversationState } from '../../types';
 import { EscalationReason } from '@prisma/client';
 import { assignQueueNumber } from '../queue/handlers';
@@ -106,6 +106,14 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             history: [],
           };
 
+          // If previous session was complete or idle, reset data and
+          // history so Zero starts the new conversation clean
+          if (['COMPLETE', 'IDLE'].includes(currentState.state)) {
+            currentState.data = {};
+            currentState.history = [];
+            currentState.state = 'START';
+          }
+
           // Run the AI brain
           const result = await processMessage(messageText, currentState, clinic);
 
@@ -125,8 +133,14 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           ].slice(-50); // Keep last 50 turns maximum — full history
                         // is always in ConversationMessage table
 
+          const nextStateName = getNextState(
+            currentState.state,
+            messageText,
+            updatedData
+          );
+
           const newState: AiConversationState = {
-            state: result.isComplete ? 'COMPLETE' : currentState.state,
+            state: result.isComplete ? 'COMPLETE' : nextStateName,
             data: updatedData,
             history: updatedHistory,
           };

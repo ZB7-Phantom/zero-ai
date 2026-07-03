@@ -682,3 +682,14 @@ export async function processMessage(
     };
   }
 }
+
+export function getNextState(
+  currentState: string,
+  message: string,
+  mergedData: Partial<any>
+): string {
+  const norm = normalise(message);
+  const stateObj = { state: currentState } as AiConversationState;
+  const intent = classifyIntent(norm, stateObj);
+  return advanceState(currentState, intent, mergedData);
+}
