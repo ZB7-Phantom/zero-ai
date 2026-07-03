@@ -140,7 +140,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           );
 
           const newState: AiConversationState = {
-            state: result.isComplete ? 'COMPLETE' : nextStateName,
+            state: result.isComplete ? 'COMPLETE' : (nextStateName as AiConversationState['state']),
             data: updatedData,
             history: updatedHistory,
           };

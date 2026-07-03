@@ -9,7 +9,6 @@ import { createBullClient } from '../../config/bullRedis';
 export const noShowQueue = new Bull('no-show-detector', {
   createClient: createBullClient,
 });
-console.log(`[noShowDetector] Bull options:`, JSON.stringify(noShowQueue.opts?.redis || 'no redis opts'));
 
 noShowQueue.on('error', (err) => {
   logger.error('noShowQueue queue error', { error: err.message });

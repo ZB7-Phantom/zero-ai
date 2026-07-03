@@ -9,7 +9,6 @@ import { createBullClient } from '../../config/bullRedis';
 export const dailyJobQueue = new Bull('daily-jobs', {
   createClient: createBullClient,
 });
-console.log(`[dailyJobQueue] Bull options:`, JSON.stringify(dailyJobQueue.opts?.redis || 'no redis opts'));
 
 dailyJobQueue.on('error', (err) => {
   logger.error('dailyJobQueue queue error', { error: err.message });

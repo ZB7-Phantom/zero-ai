@@ -9,7 +9,6 @@ import { createBullClient } from '../../config/bullRedis';
 export const reminderQueue = new Bull('appointment-reminders', {
   createClient: createBullClient,
 });
-console.log(`[reminderQueue] Bull options:`, JSON.stringify(reminderQueue.opts?.redis || 'no redis opts'));
 
 reminderQueue.on('error', (err) => {
   logger.error('reminderQueue queue error', { error: err.message });
