@@ -285,12 +285,12 @@ RESPOND ONLY WITH THIS JSON — no markdown, no explanation:
 Only include extracted fields you actually found. Never guess.`;
 
   const model = genAI.getGenerativeModel({
-    model: 'gemini-3.5-flash',
+    model: 'gemini-3.1-flash-lite',
     systemInstruction: systemPrompt,
     generationConfig: {
       responseMimeType: 'application/json',
       temperature: 0.4,
-      maxOutputTokens: 1024,
+      maxOutputTokens: 2048,
     },
   });
 
