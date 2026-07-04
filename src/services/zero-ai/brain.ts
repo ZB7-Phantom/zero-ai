@@ -176,28 +176,20 @@ export function getNextState(
       return 'COLLECTING_DETAILS';
 
     case 'COLLECTING_SYMPTOMS': {
-      const followUpCount = data.followUpCount || 0;
-      if (data.symptoms && followUpCount >= 2) {
+      const followUpCount = (data as any).followUpCount || 0;
+      if (data.symptoms && followUpCount >= 1) {
         if (data.mode === 'appointment') {
           if (!data.appointmentDate) return 'COLLECTING_APPOINTMENT_DATE';
           if (!data.appointmentTime) return 'COLLECTING_APPOINTMENT_TIME';
         }
-        // Walk-in goes to confirmation before queue
         if (data.mode === 'walkin') return 'AWAITING_CONFIRMATION';
         return 'COMPLETE';
       }
       return 'COLLECTING_SYMPTOMS';
     }
 
-    case 'AWAITING_CONFIRMATION': {
-      // Patient said yes — move to COMPLETE
-      const norm = (data as any)._lastMessage || '';
-      if (/^(yes|yeah|yep|correct|right|confirm|ok|okay|sure|yh)$/i.test(norm)) {
-        return 'COMPLETE';
-      }
-      // Patient wants to correct something — stay and let Gemini handle
-      return 'AWAITING_CONFIRMATION';
-    }
+    case 'AWAITING_CONFIRMATION':
+      return currentState;
 
     case 'COLLECTING_APPOINTMENT_DATE':
       return data.appointmentDate ? 'COLLECTING_APPOINTMENT_TIME' : currentState;
@@ -450,7 +442,8 @@ function fallbackReply(
     case 'AWAITING_CONFIRMATION': {
       if (data.mode === 'walkin') {
         const { department, urgency } = routeToDepAndUrgency(data);
-        return `Here is what I have for you, ${firstName}:\n\n*Name:* ${data.name}\n*Age:* ${data.age}\n*Complaint:* ${data.complaint}\n*Department:* ${department}\n*Urgency:* ${urgency}\n\nIs everything correct? Reply *Yes* to confirm or let me know what needs to be updated.`;
+        const displayComplaint = data.complaint || (data as any).symptoms || 'Not recorded';
+        return `Here is what I have for you, ${firstName}:\n\n*Name:* ${data.name}\n*Age:* ${data.age}\n*Complaint:* ${displayComplaint}\n*Department:* ${department}\n*Urgency:* ${urgency}\n\nIs everything correct? Reply *Yes* to confirm or let me know what needs to be updated.`;
       }
       return `Please reply *Yes* to confirm your details or let me know what you want to change.`;
     }
@@ -515,6 +508,7 @@ function buildInstruction(
     case 'AWAITING_CONFIRMATION':
       if (data.mode === 'walkin') {
         const { department, urgency } = routeToDepAndUrgency(data);
+        const displayComplaint = data.complaint || (data as any).symptoms || 'Not recorded';
         return `Intake is complete. Before assigning the queue,
         warmly summarise what was collected and ask the patient
         to confirm everything is correct. Use this exact format
@@ -525,7 +519,7 @@ function buildInstruction(
     
         *Name:* ${data.name}
         *Age:* ${data.age}
-        *Complaint:* ${data.complaint}
+        *Complaint:* ${displayComplaint}
         *Department:* ${department}
         *Urgency:* ${urgency}
     
@@ -669,7 +663,12 @@ export async function processMessage(
     Fields: name, age, gender, complaint, symptoms,
     appointmentDate, appointmentTime.
     Set reply to empty string "".
-    Only include fields you actually found in this message.`;
+    Only include fields you actually found in this message.
+    
+    - "complaint" is what the patient says is wrong with them
+      in their own words e.g. "skin rashes", "headache",
+      "chest pain". It is NEVER "walk-in", "appointment", or
+      any menu selection. Mode and complaint are different fields.`;
 
     try {
       const extractResult = await callGemini(

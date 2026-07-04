@@ -148,10 +148,16 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             preAssignedQueueNumber = await assignQueueNumber(clinic.id);
           }
 
-          currentState.data = {
-            ...currentState.data,
-            _lastMessage: messageText,
-          } as any;
+          // If waiting for confirmation and patient said yes,
+          // force state to COMPLETE so brain generates queue confirmation
+          const isConfirmation =
+            currentState.state === 'AWAITING_CONFIRMATION' &&
+            /^(yes|yeah|yep|correct|right|confirm|ok|okay|sure|yh|y)$/i
+              .test(messageText.trim());
+
+          if (isConfirmation) {
+            currentState.state = 'COMPLETE' as any;
+          }
 
           const result = await processMessage(
             messageText,
