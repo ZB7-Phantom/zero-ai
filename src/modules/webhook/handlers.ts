@@ -125,10 +125,10 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           const lastActivity = conversation.lastMessageAt;
           const sessionExpired = lastActivity && lastActivity < twoHoursAgo;
 
-          // Reset if the last session was complete, idle, or if
+          // Reset if the last session was idle, or if
           // the conversation has been inactive for over 2 hours
           if (
-            ['COMPLETE', 'IDLE'].includes(currentState.state) ||
+            currentState.state === 'IDLE' ||
             sessionExpired
           ) {
             currentState.data = {};
@@ -155,6 +155,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             currentState.data.mode === 'walkin';
 
           if (aboutToShowSummary) {
+            logger.info(`Pre-assigning queue number, current stored: ${(currentState.data as any).queueNumber}`);
             // Check if we already assigned one (don't assign twice)
             if (!(currentState.data as any).queueNumber) {
               preAssignedQueueNumber = await assignQueueNumber(clinic.id);
@@ -171,6 +172,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           // On COMPLETE turn (after "Yes"), read queue number from state
           if (currentState.state === 'AWAITING_CONFIRMATION' && isConfirmation) {
             preAssignedQueueNumber = (currentState.data as any).queueNumber;
+            logger.info(`Queue number for confirmation: ${preAssignedQueueNumber}`);
           }
 
           if (isConfirmation) {

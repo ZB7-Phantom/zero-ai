@@ -460,6 +460,9 @@ function fallbackReply(
       return `What date would you like to come in?`;
     case 'COLLECTING_APPOINTMENT_TIME':
       return `What time works best for you?`;
+    case 'IDLE':
+      return `You are all set, ${firstName}. Please take a
+    seat and we will call you when it is your turn. 🙏`;
     default:
       return `Could you say that again? I want to make sure I help you correctly.`;
   }
@@ -589,6 +592,12 @@ function buildInstruction(
 
     case 'COLLECTING_APPOINTMENT_TIME':
       return `Ask the patient what time works best. Accept morning/afternoon/evening or specific times. Extract the appointment time from this message if present.`;
+
+    case 'IDLE':
+      return `The patient has been registered and is sending
+    follow-up messages. Respond warmly and briefly —
+    let them know they are all set and to take a seat.
+    Do not restart the intake flow. Do not show the menu.`;
 
     default:
       return `Respond helpfully to the patient's message.`;
