@@ -150,6 +150,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
 
           // If waiting for confirmation and patient said yes,
           // force state to COMPLETE so brain generates queue confirmation
+          logger.info(\`Confirmation check — state: \${currentState.state}, message: "\${messageText.trim()}"\`);
           const isConfirmation =
             currentState.state === 'AWAITING_CONFIRMATION' &&
             /^(yes|yeah|yep|correct|right|confirm|ok|okay|sure|yh|y)$/i
