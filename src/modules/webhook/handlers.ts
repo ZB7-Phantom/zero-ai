@@ -140,50 +140,41 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           // force state to COMPLETE so brain generates queue confirmation
           logger.info(`Confirmation check — state: ${currentState.state}, message: "${messageText.trim()}"`);
           const isConfirmation =
-            currentState.state === 'AWAITING_CONFIRMATION' &&
+            (currentState.state === 'AWAITING_CONFIRMATION' ||
+             currentState.state === 'COLLECTING_SYMPTOMS') &&
             /^(yes|yeah|yep|correct|right|confirm|ok|okay|sure|yh|y)$/i
-              .test(messageText.trim());
-
-          // Assign queue number when about to show the confirmation
-          // summary — this is the COLLECTING_SYMPTOMS turn where
-          // followUpCount has just reached threshold.
-          // Store it in state.data so it survives to the COMPLETE turn.
-          let preAssignedQueueNumber: number | undefined;
-
-          const aboutToShowSummary =
-            currentState.state === 'COLLECTING_SYMPTOMS' &&
-            currentState.data.mode === 'walkin';
-
-          if (aboutToShowSummary) {
-            logger.info(`Pre-assigning queue number, current stored: ${(currentState.data as any).queueNumber}`);
-            // Check if we already assigned one (don't assign twice)
-            if (!(currentState.data as any).queueNumber) {
-              preAssignedQueueNumber = await assignQueueNumber(clinic.id);
-              // Store in state so COMPLETE turn can use it
-              currentState.data = {
-                ...currentState.data,
-                queueNumber: preAssignedQueueNumber,
-              } as any;
-            } else {
-              preAssignedQueueNumber = (currentState.data as any).queueNumber;
-            }
-          }
-
-          // On COMPLETE turn (after "Yes"), read queue number from state
-          if (currentState.state === 'AWAITING_CONFIRMATION' && isConfirmation) {
-            preAssignedQueueNumber = (currentState.data as any).queueNumber;
-            logger.info(`Queue number for confirmation: ${preAssignedQueueNumber}`);
-          }
+              .test(messageText.trim()) &&
+            // Only treat as confirmation if we have all required fields
+            !!(currentState.data as any).name &&
+            !!(currentState.data as any).complaint;
 
           if (isConfirmation) {
             currentState.state = 'COMPLETE' as any;
+          }
+
+          // Assign queue number when intake completes
+          let queueNumberForConfirmation: number | undefined;
+          if (
+            (currentState.state === 'AWAITING_CONFIRMATION' && isConfirmation) ||
+            (currentState.state === 'COMPLETE' && currentState.data.mode === 'walkin')
+          ) {
+            // Only assign if not already assigned this session
+            if (!(currentState.data as any).queueNumber) {
+              queueNumberForConfirmation = await assignQueueNumber(clinic.id);
+              currentState.data = {
+                ...currentState.data,
+                queueNumber: queueNumberForConfirmation,
+              } as any;
+            } else {
+              queueNumberForConfirmation = (currentState.data as any).queueNumber;
+            }
           }
 
           const result = await processMessage(
             messageText,
             currentState,
             clinic,
-            preAssignedQueueNumber
+            queueNumberForConfirmation
           );
 
           // Append this exchange to history
@@ -276,7 +267,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           // If intake is complete, upsert the patient record
           if (result.isComplete && mergedData.name) {
             // Before the upsert, get the next queue number
-            const queueNumber = preAssignedQueueNumber || await assignQueueNumber(clinic.id);
+            const queueNumber = queueNumberForConfirmation || await assignQueueNumber(clinic.id);
 
             const department = (result as any)._department;
             const urgency = (result as any)._urgency;

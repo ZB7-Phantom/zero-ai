@@ -213,7 +213,9 @@ function routeToDepAndUrgency(data: Partial<IntakeData>): {
 } {
   const combined = ((data.complaint || '') + ' ' + (data.symptoms || '')).toLowerCase();
 
-  const urgency = /\b(chest pain|heart pain|can't breathe|severe|spreading to arm|jaw|unconscious)\b/.test(combined)
+  const isHighUrgency = /\b(chest pain|heart pain|can't breathe|difficulty breathing|shortness of breath|fainted|fainting|passed out|blacked out|unconscious|collapsed|collapse|stroke|seizure|spreading to arm|spreading to jaw)\b/.test(combined);
+
+  const urgency = isHighUrgency
     ? 'HIGH'
     : /\b(fever|vomiting|blood|fracture|broken)\b/.test(combined)
     ? 'MEDIUM'
@@ -222,6 +224,7 @@ function routeToDepAndUrgency(data: Partial<IntakeData>): {
   let department = 'General';
   if (/\b(chest|heart|cardiac|cardio|palpitation)\b/.test(combined)) department = 'Cardiology';
   else if (/\b(tooth|teeth|dental|gum|jaw|brace|orthodon)\b/.test(combined)) department = 'Dental';
+  else if (/\b(faint|dizz|vertigo|balance|coordination|numb|tingle|seizure|memory|confusion)\b/.test(combined)) department = 'Neurology';
   else if (/\b(head|migraine|neuro|seizure|memory|stroke|nerve)\b/.test(combined)) department = 'Neurology';
   else if (/\b(skin|rash|acne|itch|derma|eczema)\b/.test(combined)) department = 'Dermatology';
   else if (/\b(physio|joint|muscle|back|knee|shoulder|spine)\b/.test(combined)) department = 'Physiotherapy';
@@ -487,23 +490,27 @@ function buildInstruction(
 
   if (isComplete) {
     const { department, urgency } = routeToDepAndUrgency(data);
+    const today = new Date().toLocaleDateString('en-GB', {
+      day: 'numeric', month: 'long', year: 'numeric'
+    });
     const mode = data.mode;
     if (mode === 'walkin') {
-      return `Registration is confirmed. Send the final queue
-    confirmation RIGHT NOW in this exact format — do not say
-    you are "processing" or "assigning" — just send the result:
+      return `Registration confirmed. Send this exact message
+  with no additions or changes:
 
-    Perfect! You are all set, *${data.name}*.
+You are all set, *${data.name}*.
 
-    *Queue Number:* #${queuePlaceholder}
-    *Department:* ${department}
-    *Urgency:* ${urgency}
+*Queue Number:* #${queuePlaceholder}
+*Name:* ${data.name}
+*Date:* ${today}
+*Department:* ${department}
 
-    Please take a seat at reception. I will message you the
-    moment it is your turn. 🙏
+Please take a seat — I will message you the moment it is
+your turn. 🙏
 
-    Do not add any other text before or after this.
-    Do not say you are assigning the queue — it is already done.`;
+Do not add urgency. Do not add any other text.
+Do not say you are processing or submitting anything.
+This is the final message of the intake flow.`;
     }
     if (mode === 'appointment') {
       return `Appointment booked. Confirm with this format:\n✅ *Appointment request submitted, ${data.name}.*\n\n📅 Date: *${data.appointmentDate}*\n⏰ Time: *${data.appointmentTime}*\n🏥 Service: *${data.complaint}*\n\nThe clinic will confirm shortly. 🙏\n\nDo not add or change anything.`;
