@@ -136,25 +136,42 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             currentState.state = 'START';
           }
 
-          // Determine if this message is likely to complete intake
-          // so we can pre-assign a queue number for the confirmation message
-          const isWalkinAboutToComplete =
-            (currentState.state === 'COLLECTING_SYMPTOMS' ||
-             currentState.state === 'AWAITING_CONFIRMATION') &&
-            currentState.data.mode === 'walkin';
-
-          let preAssignedQueueNumber: number | undefined;
-          if (isWalkinAboutToComplete) {
-            preAssignedQueueNumber = await assignQueueNumber(clinic.id);
-          }
-
           // If waiting for confirmation and patient said yes,
           // force state to COMPLETE so brain generates queue confirmation
-          logger.info(\`Confirmation check — state: \${currentState.state}, message: "\${messageText.trim()}"\`);
+          logger.info(`Confirmation check — state: ${currentState.state}, message: "${messageText.trim()}"`);
           const isConfirmation =
             currentState.state === 'AWAITING_CONFIRMATION' &&
             /^(yes|yeah|yep|correct|right|confirm|ok|okay|sure|yh|y)$/i
               .test(messageText.trim());
+
+          // Assign queue number when about to show the confirmation
+          // summary — this is the COLLECTING_SYMPTOMS turn where
+          // followUpCount has just reached threshold.
+          // Store it in state.data so it survives to the COMPLETE turn.
+          let preAssignedQueueNumber: number | undefined;
+
+          const aboutToShowSummary =
+            currentState.state === 'COLLECTING_SYMPTOMS' &&
+            currentState.data.mode === 'walkin';
+
+          if (aboutToShowSummary) {
+            // Check if we already assigned one (don't assign twice)
+            if (!(currentState.data as any).queueNumber) {
+              preAssignedQueueNumber = await assignQueueNumber(clinic.id);
+              // Store in state so COMPLETE turn can use it
+              currentState.data = {
+                ...currentState.data,
+                queueNumber: preAssignedQueueNumber,
+              } as any;
+            } else {
+              preAssignedQueueNumber = (currentState.data as any).queueNumber;
+            }
+          }
+
+          // On COMPLETE turn (after "Yes"), read queue number from state
+          if (currentState.state === 'AWAITING_CONFIRMATION' && isConfirmation) {
+            preAssignedQueueNumber = (currentState.data as any).queueNumber;
+          }
 
           if (isConfirmation) {
             currentState.state = 'COMPLETE' as any;

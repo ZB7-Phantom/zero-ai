@@ -486,17 +486,21 @@ function buildInstruction(
     const { department, urgency } = routeToDepAndUrgency(data);
     const mode = data.mode;
     if (mode === 'walkin') {
-      return `Intake confirmed. Assign the queue number now.
-    Be warm. Use this format exactly:
+      return `Registration is confirmed. Send the final queue
+    confirmation RIGHT NOW in this exact format — do not say
+    you are "processing" or "assigning" — just send the result:
 
-    ✅ *You're all set, ${data.name}!*
+    Perfect! You are all set, *${data.name}*.
 
     *Queue Number:* #${queuePlaceholder}
     *Department:* ${department}
     *Urgency:* ${urgency}
 
-    Please take a seat — I'll message you the moment
-    it's your turn.`;
+    Please take a seat at reception. I will message you the
+    moment it is your turn. 🙏
+
+    Do not add any other text before or after this.
+    Do not say you are assigning the queue — it is already done.`;
     }
     if (mode === 'appointment') {
       return `Appointment booked. Confirm with this format:\n✅ *Appointment request submitted, ${data.name}.*\n\n📅 Date: *${data.appointmentDate}*\n⏰ Time: *${data.appointmentTime}*\n🏥 Service: *${data.complaint}*\n\nThe clinic will confirm shortly. 🙏\n\nDo not add or change anything.`;
