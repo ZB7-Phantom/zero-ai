@@ -166,8 +166,11 @@ export async function addWalkIn(
   next: NextFunction
 ) {
   try {
-    const { name, phone, complaint, department } = req.body;
+    const { name, phone, complaint, reason, department, doctor } = req.body;
     if (!name || !phone) throw new AppError(400, 'name and phone are required', 'VALIDATION_ERROR');
+
+    // reason is the frontend's name for complaint
+    const finalComplaint = complaint || reason;
 
     const queueNumber = await assignQueueNumber(req.clinic.id);
 
@@ -177,7 +180,7 @@ export async function addWalkIn(
         clinicId: req.clinic.id,
         phone,
         name,
-        complaint,
+        complaint: finalComplaint,
         department,
         queueNumber,
         patientType: 'WALK_IN',
@@ -186,7 +189,7 @@ export async function addWalkIn(
       },
       update: {
         name,
-        complaint,
+        complaint: finalComplaint,
         department,
         queueNumber,
         status: 'WAITING',
