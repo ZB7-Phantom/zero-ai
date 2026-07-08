@@ -1,10 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { randomBytes } from 'crypto';
 import { prisma } from '../../config/database';
 import { env } from '../../config/env';
 import { AppError } from '../../middleware/errorHandler';
 import { RegisterSchema, LoginSchema } from './schemas';
+import { sendEmail } from '../../services/email';
+import { AuthenticatedRequest } from '../../types';
 
 export async function register(req: Request, res: Response, next: NextFunction) {
   try {
@@ -28,6 +31,28 @@ export async function register(req: Request, res: Response, next: NextFunction) 
     });
 
     const staff = clinic.staffMembers[0];
+
+    // Generate a secure 32-char hex token
+    const verifyToken = randomBytes(32).toString('hex');
+    const verifyExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+    // Save token to staff member
+    await prisma.staffMember.update({
+      where: { id: staff.id },
+      data: {
+        emailVerifyToken: verifyToken,
+        emailVerifyExpiry: verifyExpiry,
+      },
+    });
+
+    // Send verification email
+    const verifyUrl = `${env.FRONTEND_URL}/verify-email?token=${verifyToken}`;
+    await sendEmail({
+      to: email,
+      subject: `Verify your Zero Clinic OS account`,
+      text: `Hi ${fullName},\n\nWelcome to Zero Clinic OS.\n\nPlease verify your email address to activate your account:\n\n${verifyUrl}\n\nThis link expires in 24 hours.\n\nIf you did not create this account, you can ignore this email.\n\n— Zero Clinic OS`,
+    });
+
     const token = jwt.sign(
       { staffId: staff.id, clinicId: clinic.id, role: staff.role },
       env.JWT_SECRET,
@@ -75,5 +100,189 @@ export async function login(req: Request, res: Response, next: NextFunction) {
     );
 
     res.json({ token, staff: { id: staff.id, fullName: staff.fullName, email: staff.email, role: staff.role }, clinic: { id: staff.clinic.id, name: staff.clinic.name }, onboardingComplete });
+  } catch (err) { next(err); }
+}
+
+export async function verifyEmail(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { token } = req.body;
+    if (!token) throw new AppError(400, 'Token is required', 'MISSING_TOKEN');
+
+    const staff = await prisma.staffMember.findUnique({
+      where: { emailVerifyToken: token },
+    });
+
+    if (!staff) throw new AppError(400, 'Invalid or expired token', 'INVALID_TOKEN');
+    if (staff.emailVerifyExpiry && staff.emailVerifyExpiry < new Date()) {
+      throw new AppError(400, 'Verification link has expired', 'TOKEN_EXPIRED');
+    }
+
+    await prisma.staffMember.update({
+      where: { id: staff.id },
+      data: {
+        emailVerified: true,
+        emailVerifyToken: null,
+        emailVerifyExpiry: null,
+      },
+    });
+
+    res.json({ success: true, message: 'Email verified successfully' });
+  } catch (err) { next(err); }
+}
+
+// Resend verification email
+export async function resendVerification(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { email } = req.body;
+    if (!email) throw new AppError(400, 'Email is required', 'MISSING_EMAIL');
+
+    const staff = await prisma.staffMember.findFirst({ where: { email } });
+
+    // Always return success to prevent email enumeration
+    if (!staff || staff.emailVerified) {
+      res.json({ success: true });
+      return;
+    }
+
+    const verifyToken = randomBytes(32).toString('hex');
+    const verifyExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await prisma.staffMember.update({
+      where: { id: staff.id },
+      data: { emailVerifyToken: verifyToken, emailVerifyExpiry: verifyExpiry },
+    });
+
+    const verifyUrl = `${env.FRONTEND_URL}/verify-email?token=${verifyToken}`;
+    await sendEmail({
+      to: email,
+      subject: 'Verify your Zero Clinic OS account',
+      text: `Please verify your email:\n\n${verifyUrl}\n\nThis link expires in 24 hours.\n\n— Zero Clinic OS`,
+    });
+
+    res.json({ success: true });
+  } catch (err) { next(err); }
+}
+
+export async function forgotPassword(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { email } = req.body;
+    if (!email) throw new AppError(400, 'Email is required', 'MISSING_EMAIL');
+
+    const staff = await prisma.staffMember.findFirst({ where: { email } });
+
+    // Always return success — never confirm if email exists
+    if (!staff) {
+      res.json({ success: true });
+      return;
+    }
+
+    const resetToken = randomBytes(32).toString('hex');
+    const resetExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await prisma.staffMember.update({
+      where: { id: staff.id },
+      data: {
+        passwordResetToken: resetToken,
+        passwordResetExpiry: resetExpiry,
+      },
+    });
+
+    const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+    await sendEmail({
+      to: email,
+      subject: 'Reset your Zero Clinic OS password',
+      text: `Hi ${staff.fullName},\n\nWe received a request to reset your password.\n\nClick the link below to set a new password:\n\n${resetUrl}\n\nThis link expires in 1 hour. If you did not request this, you can safely ignore this email.\n\n— Zero Clinic OS`,
+    });
+
+    res.json({ success: true });
+  } catch (err) { next(err); }
+}
+
+export async function resetPassword(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) {
+      throw new AppError(400, 'Token and password are required', 'MISSING_FIELDS');
+    }
+    if (password.length < 8) {
+      throw new AppError(400, 'Password must be at least 8 characters', 'PASSWORD_TOO_SHORT');
+    }
+
+    const staff = await prisma.staffMember.findUnique({
+      where: { passwordResetToken: token },
+    });
+
+    if (!staff) throw new AppError(400, 'Invalid or expired reset link', 'INVALID_TOKEN');
+    if (staff.passwordResetExpiry && staff.passwordResetExpiry < new Date()) {
+      throw new AppError(400, 'Reset link has expired — request a new one', 'TOKEN_EXPIRED');
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    await prisma.staffMember.update({
+      where: { id: staff.id },
+      data: {
+        passwordHash,
+        passwordResetToken: null,
+        passwordResetExpiry: null,
+      },
+    });
+
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (err) { next(err); }
+}
+
+export async function getMe(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const staff = await prisma.staffMember.findUnique({
+      where: { id: req.staff.id },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        role: true,
+        emailVerified: true,
+        clinic: {
+          select: {
+            id: true, name: true, address: true,
+            services: true, whatsappStatus: true, plan: true,
+          },
+        },
+      },
+    });
+
+    if (!staff) throw new AppError(401, 'Session invalid', 'UNAUTHORIZED');
+
+    const staffCount = await prisma.staffMember.count({
+      where: { clinicId: req.clinic.id, isActive: true },
+    });
+
+    const onboardingComplete = !!(
+      staff.clinic.address &&
+      staff.clinic.services.length > 0 &&
+      staffCount > 1
+    );
+
+    res.json({ staff, clinic: staff.clinic, onboardingComplete });
   } catch (err) { next(err); }
 }

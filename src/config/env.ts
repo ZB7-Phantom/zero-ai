@@ -14,7 +14,7 @@ const schema = z.object({
   META_ACCESS_TOKEN: z.string().min(1),
   META_VERIFY_TOKEN: z.string().min(1),
   META_APP_SECRET: z.string().min(1),
-  RESEND_API_KEY: z.string().optional(),
+  RESEND_API_KEY: z.string().min(1),
   FROM_EMAIL: z.string().email().default('zero@latencyzero.com'),
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_PUBLIC_KEY: z.string().optional(),

@@ -114,6 +114,11 @@ model StaffMember {
   lastLoginAt  DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  emailVerified      Boolean   @default(false)
+  emailVerifyToken   String?   @unique
+  emailVerifyExpiry  DateTime?
+  passwordResetToken String?   @unique
+  passwordResetExpiry DateTime?
 
   replies ConversationMessage[]
 

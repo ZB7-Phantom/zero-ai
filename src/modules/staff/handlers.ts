@@ -4,6 +4,8 @@ import { prisma } from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
 import { AuthenticatedRequest } from '../../types';
 import { AddStaffSchema, UpdateStaffSchema } from './schemas';
+import { sendEmail } from '../../services/email';
+import { env } from '../../config/env';
 
 const TEMP_PASSWORD = 'Zero@2026!';
 
@@ -41,6 +43,12 @@ export async function addStaff(req: AuthenticatedRequest, res: Response, next: N
         passwordHash 
       },
       select: { id: true, fullName: true, email: true, role: true, specialization: true, whatsappNumber: true, lastLoginAt: true },
+    });
+
+    await sendEmail({
+      to: data.email,
+      subject: `You have been added to ${req.clinic.name} on Zero Clinic OS`,
+      text: `Hi ${data.fullName},\n\n${req.staff.fullName} has added you to ${req.clinic.name} on Zero Clinic OS.\n\nYour temporary password is: Zero@2026!\n\nPlease log in and change your password immediately:\n${env.FRONTEND_URL}/login\n\nIf you were not expecting this, contact your clinic administrator.\n\n— Zero Clinic OS`,
     });
 
     res.status(201).json(staff);
