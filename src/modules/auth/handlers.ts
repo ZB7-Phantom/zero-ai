@@ -8,6 +8,7 @@ import { AppError } from '../../middleware/errorHandler';
 import { RegisterSchema, LoginSchema } from './schemas';
 import { sendEmail } from '../../services/email';
 import { AuthenticatedRequest } from '../../types';
+import { logger } from '../../config/logger';
 
 export async function register(req: Request, res: Response, next: NextFunction) {
   try {
@@ -32,26 +33,35 @@ export async function register(req: Request, res: Response, next: NextFunction) 
 
     const staff = clinic.staffMembers[0];
 
-    // Generate a secure 32-char hex token
-    const verifyToken = randomBytes(32).toString('hex');
-    const verifyExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    // Send verification email — non-fatal if it fails
+    // The user can request a resend from the frontend
+    try {
+      const verifyToken = randomBytes(32).toString('hex');
+      const verifyExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
-    // Save token to staff member
-    await prisma.staffMember.update({
-      where: { id: staff.id },
-      data: {
-        emailVerifyToken: verifyToken,
-        emailVerifyExpiry: verifyExpiry,
-      },
-    });
+      // Save token to staff member
+      await prisma.staffMember.update({
+        where: { id: staff.id },
+        data: {
+          emailVerifyToken: verifyToken,
+          emailVerifyExpiry: verifyExpiry,
+        },
+      });
 
-    // Send verification email
-    const verifyUrl = `${env.FRONTEND_URL}/verify-email?token=${verifyToken}`;
-    await sendEmail({
-      to: email,
-      subject: `Verify your Zero Clinic OS account`,
-      text: `Hi ${fullName},\n\nWelcome to Zero Clinic OS.\n\nPlease verify your email address to activate your account:\n\n${verifyUrl}\n\nThis link expires in 24 hours.\n\nIf you did not create this account, you can ignore this email.\n\n— Zero Clinic OS`,
-    });
+      // Send verification email
+      const verifyUrl = `${env.FRONTEND_URL}/verify-email?token=${verifyToken}`;
+      await sendEmail({
+        to: email,
+        subject: `Verify your Zero Clinic OS account`,
+        text: `Hi ${fullName},\n\nWelcome to Zero Clinic OS.\n\nPlease verify your email address to activate your account:\n\n${verifyUrl}\n\nThis link expires in 24 hours.\n\nIf you did not create this account, you can ignore this email.\n\n— Zero Clinic OS`,
+      });
+    } catch (emailErr) {
+      // Log but never fail registration over an email issue
+      logger.error('Verification email failed after registration', {
+        staffId: staff.id,
+        error: (emailErr as Error).message,
+      });
+    }
 
     const token = jwt.sign(
       { staffId: staff.id, clinicId: clinic.id, role: staff.role },
