@@ -5,7 +5,10 @@ import { randomBytes } from 'crypto';
 import { prisma } from '../../config/database';
 import { env } from '../../config/env';
 import { AppError } from '../../middleware/errorHandler';
-import { RegisterSchema, LoginSchema } from './schemas';
+import {
+  RegisterSchema, LoginSchema, ResendVerificationSchema,
+  ForgotPasswordSchema, ResetPasswordSchema,
+} from './schemas';
 import { sendEmail } from '../../services/email';
 import { AuthenticatedRequest } from '../../types';
 import { logger } from '../../config/logger';
@@ -151,8 +154,7 @@ export async function resendVerification(
   next: NextFunction
 ) {
   try {
-    const { email } = req.body;
-    if (!email) throw new AppError(400, 'Email is required', 'MISSING_EMAIL');
+    const { email } = ResendVerificationSchema.parse(req.body);
 
     const staff = await prisma.staffMember.findFirst({ where: { email } });
 
@@ -187,8 +189,7 @@ export async function forgotPassword(
   next: NextFunction
 ) {
   try {
-    const { email } = req.body;
-    if (!email) throw new AppError(400, 'Email is required', 'MISSING_EMAIL');
+    const { email } = ForgotPasswordSchema.parse(req.body);
 
     const staff = await prisma.staffMember.findFirst({ where: { email } });
 
@@ -226,13 +227,7 @@ export async function resetPassword(
   next: NextFunction
 ) {
   try {
-    const { token, password } = req.body;
-    if (!token || !password) {
-      throw new AppError(400, 'Token and password are required', 'MISSING_FIELDS');
-    }
-    if (password.length < 8) {
-      throw new AppError(400, 'Password must be at least 8 characters', 'PASSWORD_TOO_SHORT');
-    }
+    const { token, password } = ResetPasswordSchema.parse(req.body);
 
     const staff = await prisma.staffMember.findUnique({
       where: { passwordResetToken: token },

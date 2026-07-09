@@ -28,9 +28,28 @@ const app = express();
 app.set('trust proxy', 1);
 const server = http.createServer(app);
 
+// Allow the configured frontend plus any extra origins (e.g. local dev servers).
+// In non-production, common Vite/CRA localhost ports are allowed automatically
+// so the frontend can be developed against the deployed backend.
+const allowedOrigins = new Set([
+  env.FRONTEND_URL,
+  ...(env.FRONTEND_URLS_EXTRA?.split(',').map((o) => o.trim()).filter(Boolean) ?? []),
+  ...(env.NODE_ENV !== 'production'
+    ? ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000']
+    : []),
+]);
+
+const corsOptions = {
+  origin(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+    callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+};
+
 // Socket.io — each clinic joins a room by clinicId so events never cross tenants
 export const io = new SocketIOServer(server, {
-  cors: { origin: env.FRONTEND_URL, methods: ['GET', 'POST'] },
+  cors: { origin: [...allowedOrigins], methods: ['GET', 'POST'] },
 });
 
 io.on('connection', (socket) => {
@@ -38,7 +57,7 @@ io.on('connection', (socket) => {
 });
 
 app.use(helmet());
-app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
+app.use(cors(corsOptions));
 app.use(compression());
 
 // Raw body preserved on every request — Meta webhook HMAC verification requires it

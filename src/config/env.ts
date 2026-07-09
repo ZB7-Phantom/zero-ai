@@ -19,6 +19,8 @@ const schema = z.object({
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_PUBLIC_KEY: z.string().optional(),
   FRONTEND_URL: z.string().url().default('https://zero-kappa-mocha.vercel.app'),
+  // Comma-separated extra origins allowed for CORS (e.g. local dev servers)
+  FRONTEND_URLS_EXTRA: z.string().optional(),
   JOB_SECRET: z.string().min(16),
 });
 
