@@ -41,8 +41,11 @@ const allowedOrigins = new Set([
 
 const corsOptions = {
   origin(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
-    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
-    callback(new Error('Not allowed by CORS'));
+    // Passing `false` (not an Error) tells the cors middleware to just omit
+    // the CORS headers — the browser blocks the response client-side. An
+    // Error here would propagate to the error handler as a 500, which is
+    // misleading for what's actually just a disallowed cross-origin request.
+    callback(null, !origin || allowedOrigins.has(origin));
   },
   credentials: true,
 };
