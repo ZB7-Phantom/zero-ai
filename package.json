@@ -18,6 +18,17 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@prisma/client": "^6.19.3",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/bull": "^3.15.9",
+    "@types/compression": "^1.8.1",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/ioredis": "^4.28.10",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^26.0.1",
+    "@types/nodemailer": "^8.0.1",
+    "@types/uuid": "^10.0.0",
     "axios": "^1.18.1",
     "bcryptjs": "^3.0.3",
     "bull": "^4.16.5",
@@ -33,24 +44,13 @@
     "nodemailer": "^9.0.3",
     "prisma": "^6.19.3",
     "socket.io": "^4.8.3",
+    "typescript": "^6.0.3",
     "uuid": "^14.0.1",
     "winston": "^3.19.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
-    "@types/bull": "^3.15.9",
-    "@types/compression": "^1.8.1",
-    "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.6",
-    "@types/ioredis": "^4.28.10",
-    "@types/jsonwebtoken": "^9.0.10",
-    "@types/multer": "^2.1.0",
-    "@types/node": "^26.0.1",
-    "@types/nodemailer": "^8.0.1",
-    "@types/uuid": "^10.0.0",
     "nodemon": "^3.1.14",
-    "ts-node": "^10.9.2",
-    "typescript": "^6.0.3"
+    "ts-node": "^10.9.2"
   }
 }
