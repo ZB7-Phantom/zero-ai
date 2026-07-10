@@ -14,12 +14,11 @@ const schema = z.object({
   META_ACCESS_TOKEN: z.string().min(1),
   META_VERIFY_TOKEN: z.string().min(1),
   META_APP_SECRET: z.string().min(1),
-  // Gmail SMTP — GMAIL_USER is both the authenticating account and the
-  // "from" address (Gmail rejects sends where they differ). Generate
-  // GMAIL_APP_PASSWORD at myaccount.google.com/apppasswords (requires
-  // 2-Step Verification enabled on the account).
-  GMAIL_USER: z.string().email(),
-  GMAIL_APP_PASSWORD: z.string().min(1),
+  // Brevo transactional email (HTTP API — SMTP is blocked outbound on
+  // Railway). FROM_EMAIL must be a verified sender in the Brevo dashboard
+  // (Settings > Senders & IP > Add a sender).
+  BREVO_API_KEY: z.string().min(1),
+  FROM_EMAIL: z.string().email(),
   FROM_NAME: z.string().default('Zero Clinic OS'),
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_PUBLIC_KEY: z.string().optional(),

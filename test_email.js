@@ -1,32 +1,33 @@
-// One-off script to verify Gmail SMTP credentials before setting them in Railway.
-// Usage: set GMAIL_USER, GMAIL_APP_PASSWORD, and TEST_EMAIL_TO in .env, then run:
+// One-off script to verify Brevo credentials before setting them in Railway.
+// Usage: set BREVO_API_KEY, FROM_EMAIL, and TEST_EMAIL_TO in .env, then run:
 //   node test_email.js
 require('dotenv').config();
-const nodemailer = require('nodemailer');
+const axios = require('axios');
 
 async function main() {
-  const { GMAIL_USER, GMAIL_APP_PASSWORD, TEST_EMAIL_TO } = process.env;
-  if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
-    console.error('Set GMAIL_USER and GMAIL_APP_PASSWORD in .env first.');
+  const { BREVO_API_KEY, FROM_EMAIL, TEST_EMAIL_TO } = process.env;
+  if (!BREVO_API_KEY || !FROM_EMAIL) {
+    console.error('Set BREVO_API_KEY and FROM_EMAIL in .env first.');
     process.exit(1);
   }
 
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
-  });
+  const to = TEST_EMAIL_TO || FROM_EMAIL;
 
-  await transporter.sendMail({
-    from: `Zero Clinic OS <${GMAIL_USER}>`,
-    to: TEST_EMAIL_TO || GMAIL_USER,
-    subject: 'Zero Clinic OS — SMTP test',
-    text: 'If you got this, Gmail SMTP is configured correctly.',
-  });
+  await axios.post(
+    'https://api.brevo.com/v3/smtp/email',
+    {
+      sender: { email: FROM_EMAIL, name: 'Zero Clinic OS' },
+      to: [{ email: to }],
+      subject: 'Zero Clinic OS — Brevo test',
+      textContent: 'If you got this, Brevo is configured correctly.',
+    },
+    { headers: { 'api-key': BREVO_API_KEY, 'Content-Type': 'application/json' } }
+  );
 
-  console.log(`Sent successfully to ${TEST_EMAIL_TO || GMAIL_USER}. Check the inbox (and spam folder).`);
+  console.log(`Sent successfully to ${to}. Check the inbox (and spam folder).`);
 }
 
 main().catch((err) => {
-  console.error('Send failed:', err.message);
+  console.error('Send failed:', err.response ? JSON.stringify(err.response.data) : err.message);
   process.exit(1);
 });
