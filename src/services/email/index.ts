@@ -22,7 +22,12 @@ const transporter = nodemailer.createTransport({
   connectionTimeout: 10_000,
   greetingTimeout: 10_000,
   socketTimeout: 15_000,
-});
+  // Railway's network resolves smtp.gmail.com to an IPv6 address but can't
+  // actually route it (ENETUNREACH) — force IPv4, which works fine.
+  // `family` is a real nodemailer/net.connect option but is missing from
+  // @types/nodemailer, hence the cast.
+  family: 4,
+} as nodemailer.TransportOptions);
 
 interface SendEmailOptions {
   to: string;
