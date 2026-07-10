@@ -11,7 +11,13 @@ import { env } from '../../config/env';
 import { logger } from '../../config/logger';
 
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  // Explicit host/port instead of the `service: 'gmail'` shorthand, which
+  // defaults to port 465 (implicit TLS) — Railway's network times out on
+  // that port. 587 (STARTTLS) is far less commonly blocked by cloud hosts.
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false,
+  requireTLS: true,
   auth: {
     user: env.GMAIL_USER,
     pass: env.GMAIL_APP_PASSWORD,
