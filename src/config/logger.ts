@@ -15,4 +15,9 @@ export const logger = winston.createLogger({
   transports: [new winston.transports.Console()],
   exceptionHandlers: [new winston.transports.Console()],
   rejectionHandlers: [new winston.transports.Console()],
+  // Without this, winston kills the process after logging any
+  // uncaught exception/rejection — e.g. a transient Redis error would
+  // take down the whole API instead of just disabling schedulers,
+  // which is the fallback app.ts already implements for that case.
+  exitOnError: false,
 });
