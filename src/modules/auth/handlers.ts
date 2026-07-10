@@ -36,35 +36,28 @@ export async function register(req: Request, res: Response, next: NextFunction) 
 
     const staff = clinic.staffMembers[0];
 
-    // Send verification email — non-fatal if it fails
-    // The user can request a resend from the frontend
-    try {
-      const verifyToken = randomBytes(32).toString('hex');
-      const verifyExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    const verifyToken = randomBytes(32).toString('hex');
+    const verifyExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
-      // Save token to staff member
-      await prisma.staffMember.update({
-        where: { id: staff.id },
-        data: {
-          emailVerifyToken: verifyToken,
-          emailVerifyExpiry: verifyExpiry,
-        },
-      });
+    // Save token to staff member
+    await prisma.staffMember.update({
+      where: { id: staff.id },
+      data: {
+        emailVerifyToken: verifyToken,
+        emailVerifyExpiry: verifyExpiry,
+      },
+    });
 
-      // Send verification email
-      const verifyUrl = `${env.FRONTEND_URL}/verify-email?token=${verifyToken}`;
-      await sendEmail({
-        to: email,
-        subject: `Verify your Zero Clinic OS account`,
-        text: `Hi ${fullName},\n\nWelcome to Zero Clinic OS.\n\nPlease verify your email address to activate your account:\n\n${verifyUrl}\n\nThis link expires in 24 hours.\n\nIf you did not create this account, you can ignore this email.\n\n— Zero Clinic OS`,
-      });
-    } catch (emailErr) {
-      // Log but never fail registration over an email issue
-      logger.error('Verification email failed after registration', {
-        staffId: staff.id,
-        error: (emailErr as Error).message,
-      });
-    }
+    // Fire the verification email without awaiting it — SMTP can be slow
+    // (or blocked/hanging on some hosts), and the client shouldn't have
+    // to wait on it to get their token back. sendEmail() already catches
+    // and logs its own errors internally, so this never throws.
+    const verifyUrl = `${env.FRONTEND_URL}/verify-email?token=${verifyToken}`;
+    sendEmail({
+      to: email,
+      subject: `Verify your Zero Clinic OS account`,
+      text: `Hi ${fullName},\n\nWelcome to Zero Clinic OS.\n\nPlease verify your email address to activate your account:\n\n${verifyUrl}\n\nThis link expires in 24 hours.\n\nIf you did not create this account, you can ignore this email.\n\n— Zero Clinic OS`,
+    });
 
     const token = jwt.sign(
       { staffId: staff.id, clinicId: clinic.id, role: staff.role },
@@ -173,7 +166,7 @@ export async function resendVerification(
     });
 
     const verifyUrl = `${env.FRONTEND_URL}/verify-email?token=${verifyToken}`;
-    await sendEmail({
+    sendEmail({
       to: email,
       subject: 'Verify your Zero Clinic OS account',
       text: `Please verify your email:\n\n${verifyUrl}\n\nThis link expires in 24 hours.\n\n— Zero Clinic OS`,
@@ -211,7 +204,7 @@ export async function forgotPassword(
     });
 
     const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${resetToken}`;
-    await sendEmail({
+    sendEmail({
       to: email,
       subject: 'Reset your Zero Clinic OS password',
       text: `Hi ${staff.fullName},\n\nWe received a request to reset your password.\n\nClick the link below to set a new password:\n\n${resetUrl}\n\nThis link expires in 1 hour. If you did not request this, you can safely ignore this email.\n\n— Zero Clinic OS`,

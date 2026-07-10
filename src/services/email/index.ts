@@ -16,6 +16,12 @@ const transporter = nodemailer.createTransport({
     user: env.GMAIL_USER,
     pass: env.GMAIL_APP_PASSWORD,
   },
+  // Fail fast instead of hanging if outbound SMTP is slow/blocked by the
+  // host — sendEmail() is called without awaiting it in request handlers,
+  // but a stuck connection would still leak sockets indefinitely.
+  connectionTimeout: 10_000,
+  greetingTimeout: 10_000,
+  socketTimeout: 15_000,
 });
 
 interface SendEmailOptions {
