@@ -1,16 +1,22 @@
 /**
- * email/index.ts — Resend email service.
+ * email/index.ts — Gmail SMTP email service (via Nodemailer).
  *
  * All transactional emails go through this file.
  * Plain text only — no HTML templates needed at this stage.
  * Keep emails short, clear, and actionable.
  */
 
-import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 import { env } from '../../config/env';
 import { logger } from '../../config/logger';
 
-const resend = new Resend(env.RESEND_API_KEY);
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: env.GMAIL_USER,
+    pass: env.GMAIL_APP_PASSWORD,
+  },
+});
 
 interface SendEmailOptions {
   to: string;
@@ -20,8 +26,8 @@ interface SendEmailOptions {
 
 export async function sendEmail(options: SendEmailOptions): Promise<void> {
   try {
-    await resend.emails.send({
-      from: env.FROM_EMAIL,
+    await transporter.sendMail({
+      from: `${env.FROM_NAME} <${env.GMAIL_USER}>`,
       to: options.to,
       subject: options.subject,
       text: options.text,
