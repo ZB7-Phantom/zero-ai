@@ -6,17 +6,37 @@ import { AuthenticatedRequest } from '../../types';
 import { io } from '../../app';
 import { sendWhatsAppMessage } from '../../services/whatsapp/client';
 
+function getInitials(name: string | null | undefined): string {
+  if (!name) return '?';
+  return name.trim().split(/\s+/).map((n) => n[0]).join('').toUpperCase().substring(0, 2) || '?';
+}
+
+function formatWaitTime(arrivalTime: Date): string {
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(arrivalTime).getTime()) / 60000));
+  if (minutes < 1) return 'Just arrived';
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rem = minutes % 60;
+  return `${hours}h ${rem}m`;
+}
+
+// Shape must match the frontend's QueueEntry type (ZERO/src/features/live-queue/LiveQueuePage.tsx) —
+// status stays the raw uppercase Prisma enum since that's what statusToTab's keys are.
 function formatQueuePatient(p: any) {
   return {
     id: p.id,
     patientId: p.id,
-    patientName: p.name,
+    name: p.name || 'Unknown',
+    initials: getInitials(p.name),
     phone: p.phone,
     queueNumber: p.queueNumber,
-    arrivalTime: p.arrivalTime,
+    arrivalTime: p.arrivalTime
+      ? new Date(p.arrivalTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+      : '—',
     doctor: null, // Assigned at appointment level, not queue level
-    reason: p.complaint,
-    status: p.status.toLowerCase(),
+    reason: p.complaint || '—',
+    waitTime: p.arrivalTime ? formatWaitTime(p.arrivalTime) : '—',
+    status: p.status,
     source: p.patientType === 'WALK_IN' ? 'walk-in' : 'zero',
   };
 }
@@ -197,7 +217,7 @@ export async function addWalkIn(
       },
     });
 
-    io.to(`clinic:${req.clinic.id}`).emit('queue:patient-added', { patient });
+    io.to(`clinic:${req.clinic.id}`).emit('queue:patient-added', { patient: formatQueuePatient(patient) });
 
     res.status(201).json(formatQueuePatient(patient));
   } catch (err) {
