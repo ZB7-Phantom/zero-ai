@@ -95,14 +95,9 @@ export async function login(req: Request, res: Response, next: NextFunction) {
       { expiresIn: env.JWT_EXPIRES_IN as any }
     );
 
-    const staffCount = await prisma.staffMember.count({
-      where: { clinicId: staff.clinicId, isActive: true },
-    });
-
     const onboardingComplete = !!(
-      staff.clinic.address &&
-      staff.clinic.services.length > 0 &&
-      staffCount > 1
+      staff.clinic.onboardingCompletedAt ||
+      (staff.clinic.address && staff.clinic.services.length > 0)
     );
 
     res.json({ token, staff: { id: staff.id, fullName: staff.fullName, email: staff.email, role: staff.role }, clinic: { id: staff.clinic.id, name: staff.clinic.name }, onboardingComplete });
@@ -264,6 +259,7 @@ export async function getMe(
           select: {
             id: true, name: true, address: true,
             services: true, whatsappStatus: true, plan: true,
+            onboardingCompletedAt: true,
           },
         },
       },
@@ -271,14 +267,9 @@ export async function getMe(
 
     if (!staff) throw new AppError(401, 'Session invalid', 'UNAUTHORIZED');
 
-    const staffCount = await prisma.staffMember.count({
-      where: { clinicId: req.clinic.id, isActive: true },
-    });
-
     const onboardingComplete = !!(
-      staff.clinic.address &&
-      staff.clinic.services.length > 0 &&
-      staffCount > 1
+      staff.clinic.onboardingCompletedAt ||
+      (staff.clinic.address && staff.clinic.services.length > 0)
     );
 
     res.json({ staff, clinic: staff.clinic, onboardingComplete });

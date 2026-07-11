@@ -50,6 +50,18 @@ export async function updateClinic(req: AuthenticatedRequest, res: Response, nex
   } catch (err) { next(err); }
 }
 
+// POST /api/clinic/complete-onboarding — marks the wizard as done for this clinic,
+// server-side, so it doesn't need to be re-completed on every device that logs in.
+export async function completeOnboarding(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const clinic = await prisma.clinic.update({
+      where: { id: req.clinic.id },
+      data: { onboardingCompletedAt: new Date() },
+    });
+    res.json(formatClinic(clinic));
+  } catch (err) { next(err); }
+}
+
 // GET /api/clinic/whatsapp-status — onboarding screen 3
 // Returns current WhatsApp connection state for the progress display
 export async function getWhatsappStatus(req: AuthenticatedRequest, res: Response, next: NextFunction) {
