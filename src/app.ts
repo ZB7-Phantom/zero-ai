@@ -48,6 +48,10 @@ const corsOptions = {
     callback(null, !origin || allowedOrigins.has(origin));
   },
   credentials: true,
+  // Non-safelisted response headers are hidden from cross-origin fetch() JS
+  // unless explicitly exposed. The frontend reads these to show a precise
+  // "try again in X" message when the auth rate limiter returns 429.
+  exposedHeaders: ['Retry-After', 'RateLimit-Reset', 'RateLimit-Limit', 'RateLimit-Remaining'],
 };
 
 // Socket.io — each clinic joins a room by clinicId so events never cross tenants
