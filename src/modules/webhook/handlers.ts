@@ -424,7 +424,10 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
     }
   } catch (err) {
     // Log but never let webhook processing crash the server
-    logger.error('Webhook processing error', { error: (err as Error).message });
+    logger.error('Webhook processing error', { 
+      error: (err as Error).message,
+      stack: (err as Error).stack?.slice(0, 500),
+    });
   }
 }
 
