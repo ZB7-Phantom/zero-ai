@@ -44,6 +44,8 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
         const phoneNumberId = value.metadata?.phone_number_id;
         const messages = value.messages;
 
+        logger.info(`Incoming phoneNumberId: ${phoneNumberId}`);
+
         if (!messages?.length || !phoneNumberId) continue;
 
         // Resolve tenant by phoneNumberId
@@ -52,7 +54,10 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
         });
 
         if (!clinic) {
-          logger.warn('Unknown phoneNumberId — message dropped', { phoneNumberId });
+          logger.warn('Unknown phoneNumberId — message dropped', { 
+            phoneNumberId,
+            receivedId: phoneNumberId,
+          });
           continue;
         }
 
