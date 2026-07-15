@@ -41,6 +41,10 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
         if (change.field !== 'messages') continue;
 
         const value = change.value;
+
+        logger.info(`Full value keys: ${JSON.stringify(Object.keys(value))}`);
+        logger.info(`Metadata: ${JSON.stringify(value.metadata)}`);
+        logger.info(`Full value sample: ${JSON.stringify(value).slice(0, 500)}`);
         const phoneNumberId = value.metadata?.phone_number_id;
         const messages = value.messages;
 
