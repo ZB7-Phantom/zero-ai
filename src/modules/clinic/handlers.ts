@@ -1,5 +1,8 @@
 import { Response, NextFunction } from 'express';
+import axios from 'axios';
 import { prisma } from '../../config/database';
+import { env } from '../../config/env';
+import { logger } from '../../config/logger';
 import { AppError } from '../../middleware/errorHandler';
 import { AuthenticatedRequest } from '../../types';
 import { UpdateClinicSchema, normaliseClinicUpdate } from './schemas';
@@ -72,4 +75,126 @@ export async function getWhatsappStatus(req: AuthenticatedRequest, res: Response
     });
     res.json(clinic);
   } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/clinic/connect-whatsapp
+ *
+ * Called by the frontend immediately after the clinic
+ * completes Meta's Embedded Signup popup. Receives the
+ * auth code and WABA details, exchanges for a permanent
+ * token, stores credentials against the clinic record.
+ *
+ * After this call succeeds, the clinic's WhatsApp number
+ * is live and Zero will receive their patients' messages.
+ */
+export async function connectWhatsApp(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { code, phoneNumberId, wabaId, phoneNumber } = req.body;
+
+    if (!code || !phoneNumberId || !wabaId) {
+      throw new AppError(
+        400,
+        'code, phoneNumberId, and wabaId are required',
+        'MISSING_FIELDS'
+      );
+    }
+
+    // Exchange the short-lived auth code for a permanent
+    // System User access token. This token is what Zero
+    // uses to send WhatsApp messages on the clinic's behalf.
+    const tokenResponse = await axios.get(
+      'https://graph.facebook.com/v19.0/oauth/access_token',
+      {
+        params: {
+          client_id: env.META_APP_ID,
+          client_secret: env.META_APP_SECRET,
+          code,
+        },
+      }
+    );
+
+    const accessToken = tokenResponse.data.access_token;
+    if (!accessToken) {
+      throw new AppError(502, 'Failed to exchange auth code', 'TOKEN_EXCHANGE_FAILED');
+    }
+
+    // Store credentials against the clinic record
+    const clinic = await prisma.clinic.update({
+      where: { id: req.clinic.id },
+      data: {
+        phoneNumberId,
+        phoneNumber: phoneNumber || null,
+        metaAccessToken: accessToken,
+        whatsappStatus: 'CONNECTED',
+      },
+    });
+
+    logger.info('Clinic connected WhatsApp', {
+      clinicId: req.clinic.id,
+      phoneNumberId,
+      wabaId,
+    });
+
+    // Register the webhook subscription for this WABA
+    // so Meta starts sending this clinic's messages to us
+    try {
+      await axios.post(
+        `https://graph.facebook.com/v19.0/${wabaId}/subscribed_apps`,
+        {},
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+    } catch (webhookErr) {
+      // Non-fatal — clinic can still use Zero, webhook
+      // subscription can be retried manually if needed
+      logger.error('Webhook subscription failed', {
+        clinicId: req.clinic.id,
+        error: (webhookErr as Error).message,
+      });
+    }
+
+    res.json({
+      success: true,
+      whatsappStatus: 'CONNECTED',
+      phoneNumber: clinic.phoneNumber,
+      phoneNumberId: clinic.phoneNumberId,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/clinic/disconnect-whatsapp
+ *
+ * Allows a clinic admin to disconnect their WhatsApp number.
+ * Clears stored credentials and stops Zero from processing
+ * their messages.
+ */
+export async function disconnectWhatsApp(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    await prisma.clinic.update({
+      where: { id: req.clinic.id },
+      data: {
+        phoneNumberId: null,
+        phoneNumber: null,
+        metaAccessToken: null,
+        whatsappStatus: 'NOT_CONNECTED',
+      },
+    });
+
+    logger.info('Clinic disconnected WhatsApp', { clinicId: req.clinic.id });
+
+    res.json({ success: true, whatsappStatus: 'NOT_CONNECTED' });
+  } catch (err) {
+    next(err);
+  }
 }

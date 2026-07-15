@@ -9,8 +9,12 @@ import { logger } from '../../config/logger';
 export async function sendWhatsAppMessage(
   phoneNumberId: string,
   to: string,
-  text: string
+  text: string,
+  accessToken?: string  // clinic-specific token if available
 ): Promise<void> {
+  // Use clinic token if provided, fall back to global token
+  const token = accessToken || env.META_ACCESS_TOKEN;
+
   try {
     await axios.post(
       `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
@@ -22,7 +26,7 @@ export async function sendWhatsAppMessage(
       },
       {
         headers: {
-          Authorization: `Bearer ${env.META_ACCESS_TOKEN}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
       }

@@ -353,7 +353,12 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           }
 
           // Send reply to patient via WhatsApp
-          await sendWhatsAppMessage(phoneNumberId, patientPhone, finalReply);
+          await sendWhatsAppMessage(
+            phoneNumberId,
+            patientPhone,
+            finalReply,
+            clinic.metaAccessToken || undefined
+          );
 
           // Emit real-time event to clinic dashboard via Socket.io
           io.to(`clinic:${clinic.id}`).emit('conversation:updated', {
