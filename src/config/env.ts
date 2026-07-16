@@ -18,8 +18,8 @@ const schema = z.object({
   // Brevo transactional email (HTTP API — SMTP is blocked outbound on
   // Railway). FROM_EMAIL must be a verified sender in the Brevo dashboard
   // (Settings > Senders & IP > Add a sender).
-  BREVO_API_KEY: z.string().min(1),
-  FROM_EMAIL: z.string().email(),
+  BREVO_API_KEY: z.string().optional(),
+  FROM_EMAIL: z.string().email().optional(),
   FROM_NAME: z.string().default('Zero Clinic OS'),
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_PUBLIC_KEY: z.string().optional(),

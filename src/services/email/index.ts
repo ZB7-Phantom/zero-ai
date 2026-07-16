@@ -21,6 +21,11 @@ interface SendEmailOptions {
 }
 
 export async function sendEmail(options: SendEmailOptions): Promise<void> {
+  if (!env.BREVO_API_KEY || !env.FROM_EMAIL) {
+    logger.warn('Email not configured — skipping');
+    return;
+  }
+
   try {
     await axios.post(
       'https://api.brevo.com/v3/smtp/email',
