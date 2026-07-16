@@ -126,6 +126,6 @@ async function start() {
 process.on('SIGTERM', async () => { await prisma.$disconnect(); process.exit(0); });
 process.on('SIGINT',  async () => { await prisma.$disconnect(); process.exit(0); });
 
-start().catch((err) => { logger.error('Startup failed', { err }); process.exit(1); });
+start().catch((err) => { logger.error(`Startup failed: ${(err as Error).message}`); process.exit(1); });
 
 export { app, server };
