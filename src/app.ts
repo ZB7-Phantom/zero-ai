@@ -109,6 +109,7 @@ async function start() {
   try {
     // Test Redis connection before starting Bull queues
     await redis.ping();
+    logger.info(`Redis URL prefix: ${env.REDIS_URL?.slice(0, 20)}`);
     logger.info('Redis ping successful — starting schedulers');
     await scheduleMidnightReset();
     await scheduleReminders();
