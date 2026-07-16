@@ -20,10 +20,7 @@ import appointmentsRouter from './modules/appointments/router';
 import conversationsRouter from './modules/conversations/router';
 import notificationsRouter from './modules/notifications/router';
 import analyticsRouter from './modules/analytics/router';
-import { scheduleMidnightReset } from './services/scheduler/queueReset';
-import { scheduleReminders } from './services/scheduler/appointmentReminders';
-import { scheduleNoShowDetector } from './services/scheduler/noShowDetector';
-import { redis } from './config/redis';
+import { startSchedulers } from './services/scheduler';
 const app = express();
 app.set('trust proxy', 1);
 const server = http.createServer(app);
@@ -104,24 +101,8 @@ async function start() {
     });
   });
 
-  // Schedulers run after server is accepting connections
-  // Failures here do not take down the server
-  try {
-    // Test Redis connection before starting Bull queues
-    await redis.ping();
-    logger.info(`Redis URL prefix: ${env.REDIS_URL?.slice(0, 20)}`);
-    logger.info('Redis ping successful — starting schedulers');
-    await scheduleMidnightReset();
-    await scheduleReminders();
-    await scheduleNoShowDetector();
-    logger.info('Scheduler ready');
-  } catch (err) {
-    // Redis is unavailable — log and continue without schedulers
-    // Server stays up for WhatsApp handling even if jobs are down
-    logger.error('Redis unavailable — schedulers disabled', {
-      error: (err as Error).message,
-    });
-  }
+  // Schedulers — in-process cron, no Redis dependency
+  startSchedulers();
 }
 
 process.on('SIGTERM', async () => { await prisma.$disconnect(); process.exit(0); });

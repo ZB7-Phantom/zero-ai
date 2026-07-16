@@ -97,12 +97,17 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           });
 
           // Prevent concurrent processing of the same conversation
-          // Redis lock expires in 10 seconds — enough for one turn
+          // Conversation lock — only if Redis is available
+          let lockAcquired = false;
           const lockKey = `conv:lock:${conversation.id}`;
-          const locked = await redis.set(lockKey, '1', 'EX', 10, 'NX');
-          if (!locked) {
-            logger.info('Conversation locked — skipping concurrent message');
-            continue;
+          
+          if (redis) {
+            const locked = await redis.set(lockKey, '1', 'EX', 10, 'NX');
+            if (!locked) {
+              logger.info('Conversation locked — skipping concurrent message');
+              continue;
+            }
+            lockAcquired = true;
           }
 
           try {
@@ -426,7 +431,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             });
           }
           } finally {
-            await redis.del(lockKey);
+            if (redis && lockAcquired) await redis.del(lockKey);
           }
         }
       }
