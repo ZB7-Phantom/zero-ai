@@ -10,8 +10,8 @@ if (env.REDIS_URL) {
     enableReadyCheck: false,
     retryStrategy: (times) => Math.min(times * 1000, 30000),
   });
-  redis.on('connect', () => logger.info('Redis connected'));
-  redis.on('error', (err) => logger.error('Redis error', { error: err.message }));
+  redis?.on('connect', () => logger.info('Redis connected'));
+  redis?.on('error', (err) => logger.error('Redis error', { error: err.message }));
 } else {
   logger.warn('REDIS_URL not set — Redis disabled, conversation locking inactive');
 }

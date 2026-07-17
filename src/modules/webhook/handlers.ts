@@ -101,8 +101,9 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           let lockAcquired = false;
           const lockKey = `conv:lock:${conversation.id}`;
           
-          if (redis) {
-            const locked = await redis.set(lockKey, '1', 'EX', 10, 'NX');
+          const redisClient = redis;
+          if (redisClient) {
+            const locked = await redisClient.set(lockKey, '1', 'EX', 10, 'NX');
             if (!locked) {
               logger.info('Conversation locked — skipping concurrent message');
               continue;
@@ -431,7 +432,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             });
           }
           } finally {
-            if (redis && lockAcquired) await redis.del(lockKey);
+            if (redisClient && lockAcquired) await redisClient.del(lockKey);
           }
         }
       }
