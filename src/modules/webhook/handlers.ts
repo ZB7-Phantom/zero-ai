@@ -185,6 +185,8 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             }
           }
 
+          logger.info(`Queue number before processMessage: ${queueNumberForConfirmation}`);
+          logger.info(`Current state: ${currentState.state}, mode: ${currentState.data.mode}`);
           const result = await processMessage(
             messageText,
             currentState,

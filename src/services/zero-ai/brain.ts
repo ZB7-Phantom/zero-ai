@@ -217,7 +217,7 @@ function routeToDepAndUrgency(data: Partial<IntakeData>): {
 
   const urgency = isHighUrgency
     ? 'HIGH'
-    : /\b(fever|vomiting|blood|fracture|broken)\b/.test(combined)
+    : /\b(fever|vomiting|blood|fracture|broken|severe pain|pain on \d|pain is [7-9]|breast pain|lump|swelling|discharge)\b/.test(combined)
     ? 'MEDIUM'
     : 'LOW';
 
@@ -231,6 +231,8 @@ function routeToDepAndUrgency(data: Partial<IntakeData>): {
   else if (/\b(eye|vision|ear|hearing|nose|throat|ent|sinus)\b/.test(combined)) department = 'ENT';
   else if (/\b(stomach|abdomen|nausea|vomit|diarrhea|digest|bowel)\b/.test(combined)) department = 'Gastroenterology';
   else if (/\b(lab|test|blood test|urine|sample|check.?up)\b/.test(combined)) department = 'Laboratory';
+  else if (/\b(breast|nipple|gynaecol|gynecol|period|menstrual|ovarian|uterus|cervical|vaginal|reproductive)\b/.test(combined)) department = 'Gynaecology';
+  else if (/\b(prostate|testicular|erectile|urolog)\b/.test(combined)) department = 'Urology';
 
   return { department, urgency };
 }
