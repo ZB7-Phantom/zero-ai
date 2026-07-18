@@ -185,6 +185,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             }
           }
 
+          logger.info(`Pre-call state: ${currentState.state}, queueNum: ${queueNumberForConfirmation}`);
           const result = await processMessage(
             messageText,
             currentState,

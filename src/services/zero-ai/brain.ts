@@ -215,9 +215,13 @@ function routeToDepAndUrgency(data: Partial<IntakeData>): {
 
   const isHighUrgency = /\b(chest pain|heart pain|can't breathe|difficulty breathing|shortness of breath|fainted|fainting|passed out|blacked out|unconscious|collapsed|collapse|stroke|seizure|spreading to arm|spreading to jaw)\b/.test(combined);
 
+  const isMediumUrgency =
+    /\b(fever|vomiting|blood|fracture|broken|severe pain|pain on \d|pain is [7-9]|breast pain|lump|swelling|discharge)\b/.test(combined) ||
+    (combined.includes('breast') && (data.age as any) > 45);
+
   const urgency = isHighUrgency
     ? 'HIGH'
-    : /\b(fever|vomiting|blood|fracture|broken)\b/.test(combined)
+    : isMediumUrgency
     ? 'MEDIUM'
     : 'LOW';
 
@@ -225,7 +229,7 @@ function routeToDepAndUrgency(data: Partial<IntakeData>): {
   if (/\b(chest|heart|cardiac|cardio|palpitation)\b/.test(combined)) department = 'Cardiology';
   else if (/\b(tooth|teeth|dental|gum|jaw|brace|orthodon)\b/.test(combined)) department = 'Dental';
   else if (/\b(faint|dizz|vertigo|balance|coordination|numb|tingle|seizure|memory|confusion)\b/.test(combined)) department = 'Neurology';
-  else if (/\b(head|migraine|neuro|seizure|memory|stroke|nerve)\b/.test(combined)) department = 'Neurology';
+  else if (/\b(breast|nipple|gynaecol|gynecol|period|menstrual|ovarian|uterus|cervical|vaginal|reproductive|womb)\b/.test(combined)) department = 'Gynaecology';
   else if (/\b(skin|rash|acne|itch|derma|eczema)\b/.test(combined)) department = 'Dermatology';
   else if (/\b(physio|joint|muscle|back|knee|shoulder|spine)\b/.test(combined)) department = 'Physiotherapy';
   else if (/\b(eye|vision|ear|hearing|nose|throat|ent|sinus)\b/.test(combined)) department = 'ENT';
@@ -308,6 +312,11 @@ async function callGemini(
     name. "Dr. Damodred", "Mrs. Okonkwo", "Prof. Williams".
 
   CRITICAL RULES:
+  - Use the patient's name or title AT MOST TWICE in the
+    entire conversation — once when you first learn it,
+    once in the final confirmation. Never in between.
+    Reading "Mrs. Lemin" in every single message is
+    deeply impersonal and robotic.
   - NEVER ask for information that already exists in the
     INSTRUCTION context or in the conversation history.
     If the INSTRUCTION shows the patient's name, age, or
@@ -548,17 +557,35 @@ This is the final message of the intake flow.`;
     case 'MENU':
       return `Greet the patient warmly and show the clinic menu with these exact options:\n1️⃣ Walk-in — join today's queue\n2️⃣ Book an appointment\n3️⃣ I'm on my way to the clinic\n4️⃣ Check my queue number\n\nMention the clinic name *${clinicName}* and your name *Zero*.`;
 
-    case 'COLLECTING_DETAILS':
+    case 'COLLECTING_DETAILS': {
+      const missing = [];
+      if (!data.name) missing.push('full name');
+      if (!data.age) missing.push('age');
+      if (!data.gender) missing.push('gender');
+  
+      if (missing.length === 3) {
+        // Nothing collected yet — ask all three at once
+        return `Ask the patient for their full name, age, and
+        gender in a single natural question. Extract all three
+        fields from this message if present. Example tone:
+        "To get you registered, could I get your full name,
+        age, and gender?"`;
+      }
       if (!data.name) {
-        return `Ask for the patient's full name warmly. Extract their name from this message if present.`;
+        return `Ask for the patient's full name only. Extract
+        it from this message if present.`;
       }
       if (!data.age) {
-        return `Thank the patient by their first name *${firstName}* and ask how old they are. Extract their age from this message if present.`;
+        return `Ask ${(data as any).firstName || 'the patient'}
+        for their age only. Extract it from this message.`;
       }
       if (!data.gender) {
-        return `Ask the patient their gender — Male, Female, or Prefer not to say. Extract gender from this message if present.`;
+        return `Ask for gender — Male, Female, or Prefer not
+        to say. Extract it from this message.`;
       }
-      return `Show empathy and ask what brings ${firstName} to *${clinicName}* today. Extract their complaint from this message if present.`;
+      return `Ask what brings ${(data as any).firstName || 'them'}
+      to ${clinic.name} today. Extract their complaint.`;
+    }
 
     case 'COLLECTING_SYMPTOMS': {
       const followUpCount = data.followUpCount || 0;
@@ -688,22 +715,41 @@ export async function processMessage(
     - "complaint" is what the patient says is wrong with them
       in their own words e.g. "skin rashes", "headache",
       "chest pain". It is NEVER "walk-in", "appointment", or
-      any menu selection. Mode and complaint are different fields.`;
+      any menu selection. Mode and complaint are different fields.
 
-    try {
-      const extractResult = await callGemini(
-        message, state.history, extractionPrompt, clinic
-      );
-      // Merge: only take new non-null fields, never overwrite existing
-      for (const [key, val] of Object.entries(extractResult.extracted)) {
-        if (val !== null && val !== undefined && val !== '') {
-          if (!(state.data as any)[key]) {
-            (extracted as any)[key] = val;
+    SMART EXTRACTION RULES:
+    - If the patient mentions duration ("for two days",
+      "since yesterday", "past week") — extract it as part
+      of symptoms. DO NOT ask for duration again.
+    - If the patient mentions severity ("very painful",
+      "can barely walk", "mild") — extract that as part of
+      symptoms. DO NOT ask for pain scale.
+    - NEVER ask "how long have you had this" if duration
+      was already mentioned in any message.
+    - NEVER ask for a pain scale (1-10). It sounds clinical
+      and robotic. If patient volunteers a number, record it.
+      If not, do not ask.`;
+
+    // Skip extraction pass if we are just starting to collect details and message is short
+    const wordCount = norm.split(/\s+/).length;
+    const skipExtraction = state.state === 'COLLECTING_DETAILS' && wordCount < 15;
+
+    if (!skipExtraction) {
+      try {
+        const extractResult = await callGemini(
+          message, state.history, extractionPrompt, clinic
+        );
+        // Merge: only take new non-null fields, never overwrite existing
+        for (const [key, val] of Object.entries(extractResult.extracted)) {
+          if (val !== null && val !== undefined && val !== '') {
+            if (!(state.data as any)[key]) {
+              (extracted as any)[key] = val;
+            }
           }
         }
+      } catch {
+        // Extraction failed silently — continue with what we have
       }
-    } catch {
-      // Extraction failed silently — continue with what we have
     }
 
     // Build mergedData preserving ALL existing data
