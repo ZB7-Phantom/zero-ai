@@ -108,6 +108,15 @@ const GREETING_PATTERNS = [
 ];
 const WALKIN_PATTERNS = [
   /\b(walk.?in|join queue|register|check in|i('m| am) here|i want to see|i need to see)\b/,
+  // Natural ways patients ask to be seen. Without these, someone who doesn't
+  // pick a menu number and phrases it conversationally ("I'd like to see a
+  // doctor", "I'm not feeling well") matches no intent, so the state machine
+  // stays stuck on MENU and never starts intake. Escalation patterns are still
+  // checked first, so "chest pain, need a doctor" still escalates.
+  /\b(i'?d like to see|(would |i )?like to be seen|want to be seen|need to be seen)\b/,
+  /\bsee (a |an |the |my )?(doctor|dr|physician|nurse|gp|someone|somebody)\b/,
+  /\bneed (a |an |to )?(doctor|checkup|check ?up|be seen|see someone)\b/,
+  /\b(not feeling (well|good|great)|feeling (sick|unwell|ill)|i'?m (sick|unwell|ill)|feel sick)\b/,
 ];
 const APPOINTMENT_PATTERNS = [
   /\b(book|appointment|schedule|reserve|i('d| would) like to book)\b/,
