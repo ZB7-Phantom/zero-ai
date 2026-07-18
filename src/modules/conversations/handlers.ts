@@ -127,6 +127,8 @@ export async function takeOver(
     io.to(`clinic:${req.clinic.id}`).emit('conversation:updated', {
       conversationId: conversation.id,
       status: 'STAFF_TOOK_OVER',
+      lastMessage: conversation.lastMessagePreview || '',
+      escalated: false,
     });
 
     logger.info('Staff took over conversation', {
@@ -191,7 +193,9 @@ export async function reply(
 
     io.to(`clinic:${req.clinic.id}`).emit('conversation:updated', {
       conversationId: conversation.id,
+      status: 'STAFF_TOOK_OVER',
       lastMessage: content,
+      escalated: false,
     });
 
     res.status(201).json(message);
@@ -233,6 +237,8 @@ export async function resolve(
     io.to(`clinic:${req.clinic.id}`).emit('conversation:updated', {
       conversationId: conversation.id,
       status: 'RESOLVED',
+      lastMessage: conversation.lastMessagePreview || '',
+      escalated: false,
     });
 
     logger.info('Conversation resolved', {
