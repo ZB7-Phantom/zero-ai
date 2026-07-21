@@ -18,6 +18,11 @@ export const UpdateClinicSchema = z.object({
   openDays: z.array(z.number()).optional(),
   opensAt: z.string().regex(/^\d{2}:\d{2}$/).optional(),
   closesAt: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  // Notification preferences — toggled from Settings.
+  escalationAlerts: z.boolean().optional(),
+  recallReminders: z.boolean().optional(),
+  noShowAlerts: z.boolean().optional(),
+  dailySummaryEmail: z.boolean().optional(),
 });
 
 // Normalises frontend field names to internal DB field names
@@ -31,5 +36,9 @@ export function normaliseClinicUpdate(raw: z.infer<typeof UpdateClinicSchema>) {
       : raw.openDays,
     opensAt: raw.operatingHours?.openTime ?? raw.opensAt,
     closesAt: raw.operatingHours?.closeTime ?? raw.closesAt,
+    escalationAlerts: raw.escalationAlerts,
+    recallReminders: raw.recallReminders,
+    noShowAlerts: raw.noShowAlerts,
+    dailySummaryEmail: raw.dailySummaryEmail,
   };
 }
