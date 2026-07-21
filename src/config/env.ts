@@ -15,6 +15,11 @@ const schema = z.object({
   META_ACCESS_TOKEN: z.string().min(1),
   META_VERIFY_TOKEN: z.string().min(1),
   META_APP_SECRET: z.string().min(1),
+  // When 'true', inbound webhook POSTs must carry a valid Meta
+  // X-Hub-Signature-256 HMAC (signed with META_APP_SECRET) or they're
+  // rejected. Left 'false' by default so unsigned local test traffic still
+  // works; flip to 'true' in the deployed env for production security.
+  WEBHOOK_VERIFY_SIGNATURE: z.enum(['true', 'false']).default('false'),
   // Brevo transactional email (HTTP API — SMTP is blocked outbound on
   // Railway). FROM_EMAIL must be a verified sender in the Brevo dashboard
   // (Settings > Senders & IP > Add a sender).

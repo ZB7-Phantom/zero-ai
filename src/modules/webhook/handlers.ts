@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import { prisma } from '../../config/database';
 import { logger } from '../../config/logger';
 import { env } from '../../config/env';
@@ -27,8 +28,33 @@ export function verify(req: Request, res: Response): void {
   }
 }
 
+// Verifies Meta's X-Hub-Signature-256 HMAC over the raw request body.
+// Returns true when the signature is valid (or verification is disabled).
+function isValidSignature(req: Request): boolean {
+  if (env.WEBHOOK_VERIFY_SIGNATURE !== 'true') return true; // gated off by default
+
+  const header = req.get('x-hub-signature-256');
+  const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
+  if (!header || !rawBody) return false;
+
+  const expected =
+    'sha256=' + crypto.createHmac('sha256', env.META_APP_SECRET).update(rawBody).digest('hex');
+
+  // Constant-time compare; timingSafeEqual throws on length mismatch, so guard.
+  const a = Buffer.from(header);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 // Meta calls POST /webhook/whatsapp for every event (messages, status updates, etc.)
 export async function receive(req: Request, res: Response, next: NextFunction): Promise<void> {
+  // Reject forged/unsigned payloads before doing any work (when enabled).
+  if (!isValidSignature(req)) {
+    logger.warn('Webhook rejected — invalid X-Hub-Signature-256');
+    res.sendStatus(401);
+    return;
+  }
+
   // Always respond 200 immediately — Meta will retry if we take too long
   res.sendStatus(200);
 
