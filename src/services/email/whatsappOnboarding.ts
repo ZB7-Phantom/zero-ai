@@ -81,7 +81,7 @@ export function notifyClinicEnterOtp(clinic: ClinicLike): void {
       `We've started connecting your WhatsApp number. Meta is sending a 6-digit ` +
       `verification code to ${clinic.whatsappRequestedNumber || 'your number'} by SMS or call.\n\n` +
       `Please open Zero and enter it right away — codes expire in about 10 minutes:\n` +
-      `${env.FRONTEND_URL}\n\n` +
+      `${env.FRONTEND_URL}/settings\n\n` +
       `Didn't get a code? You can ask us to resend it from the same screen.\n\n— Zero`,
   });
 }
