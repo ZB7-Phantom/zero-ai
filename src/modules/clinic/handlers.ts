@@ -5,7 +5,17 @@ import { env } from '../../config/env';
 import { logger } from '../../config/logger';
 import { AppError } from '../../middleware/errorHandler';
 import { AuthenticatedRequest } from '../../types';
-import { UpdateClinicSchema, normaliseClinicUpdate } from './schemas';
+import {
+  UpdateClinicSchema,
+  normaliseClinicUpdate,
+  RequestWhatsAppSchema,
+  SubmitOtpSchema,
+} from './schemas';
+import {
+  notifyAdminsNewRequest,
+  notifyAdminsClinicReady,
+  notifyAdminsOtpSubmitted,
+} from '../../services/email/whatsappOnboarding';
 
 // Helper — converts DB clinic row to frontend shape
 function formatClinic(clinic: any) {
@@ -66,14 +76,137 @@ export async function completeOnboarding(req: AuthenticatedRequest, res: Respons
 }
 
 // GET /api/clinic/whatsapp-status — onboarding screen 3
-// Returns current WhatsApp connection state for the progress display
+// Returns current WhatsApp connection state for the progress display. The
+// frontend polls this while a manual connection is in flight to auto-advance
+// its screen (pending → enter-code → connected) as our team acts.
 export async function getWhatsappStatus(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   try {
     const clinic = await prisma.clinic.findUnique({
       where: { id: req.clinic.id },
-      select: { whatsappStatus: true, phoneNumber: true, phoneNumberId: true },
+      select: {
+        whatsappStatus: true,
+        phoneNumber: true,
+        phoneNumberId: true,
+        whatsappRequestedNumber: true,
+        whatsappSetupChoice: true,
+        whatsappOtpSubmittedAt: true,
+      },
     });
     res.json(clinic);
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/clinic/request-whatsapp
+ *
+ * Manual ("concierge") connection — step 1. The clinic hands us the number
+ * they want connected, a contact email, and which onboarding branch they
+ * chose. We record it, move them to VERIFICATION_PENDING, and ping the Zero
+ * team to add the number to our Meta Business Manager.
+ */
+export async function requestWhatsApp(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const { phoneNumber, email, setupChoice } = RequestWhatsAppSchema.parse(req.body);
+
+    const clinic = await prisma.clinic.update({
+      where: { id: req.clinic.id },
+      data: {
+        whatsappStatus: 'VERIFICATION_PENDING',
+        whatsappRequestedNumber: phoneNumber,
+        whatsappNotifyEmail: email,
+        whatsappSetupChoice: setupChoice,
+        whatsappRequestedAt: new Date(),
+        // Clear any stale state from a previous attempt
+        whatsappClinicReadyAt: null,
+        whatsappOtpCode: null,
+        whatsappOtpSubmittedAt: null,
+      },
+    });
+
+    logger.info('Clinic requested WhatsApp connection', {
+      clinicId: req.clinic.id,
+      setupChoice,
+    });
+
+    notifyAdminsNewRequest(clinic);
+
+    res.json({
+      whatsappStatus: clinic.whatsappStatus,
+      phoneNumber: clinic.phoneNumber,
+      phoneNumberId: clinic.phoneNumberId,
+      whatsappRequestedNumber: clinic.whatsappRequestedNumber,
+      whatsappSetupChoice: clinic.whatsappSetupChoice,
+      whatsappOtpSubmittedAt: clinic.whatsappOtpSubmittedAt,
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/clinic/whatsapp-ready
+ *
+ * Manual connection — the clinic clicks "I'm ready to receive my code". We
+ * record that they're online right now and nudge the team, so the code can be
+ * sent while they're watching (codes expire in ~10 min). Only meaningful while
+ * still pending or awaiting a code.
+ */
+export async function whatsappReady(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const current = await prisma.clinic.findUnique({
+      where: { id: req.clinic.id },
+      select: { whatsappStatus: true },
+    });
+    if (!current || !['VERIFICATION_PENDING', 'AWAITING_OTP'].includes(current.whatsappStatus)) {
+      throw new AppError(409, 'No connection is in progress', 'INVALID_STATE');
+    }
+
+    const clinic = await prisma.clinic.update({
+      where: { id: req.clinic.id },
+      data: { whatsappClinicReadyAt: new Date() },
+    });
+
+    notifyAdminsClinicReady(clinic);
+
+    res.json({ success: true, whatsappStatus: clinic.whatsappStatus });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/clinic/submit-otp
+ *
+ * Manual connection — the clinic relays the code Meta texted them. We store it
+ * for the team to read and enter on Meta's side, and alert them immediately
+ * (the code expires fast). The clinic stays in AWAITING_OTP until the team
+ * confirms the number is live.
+ */
+export async function submitOtp(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const { code } = SubmitOtpSchema.parse(req.body);
+
+    const current = await prisma.clinic.findUnique({
+      where: { id: req.clinic.id },
+      select: { whatsappStatus: true },
+    });
+    if (!current || current.whatsappStatus !== 'AWAITING_OTP') {
+      throw new AppError(409, "We're not expecting a code yet — please wait for the go-ahead", 'INVALID_STATE');
+    }
+
+    const clinic = await prisma.clinic.update({
+      where: { id: req.clinic.id },
+      data: {
+        whatsappOtpCode: code,
+        whatsappOtpSubmittedAt: new Date(),
+      },
+    });
+
+    logger.info('Clinic submitted WhatsApp OTP', { clinicId: req.clinic.id });
+
+    notifyAdminsOtpSubmitted(clinic);
+
+    res.json({
+      success: true,
+      whatsappStatus: clinic.whatsappStatus,
+      whatsappOtpSubmittedAt: clinic.whatsappOtpSubmittedAt,
+    });
   } catch (err) { next(err); }
 }
 

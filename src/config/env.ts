@@ -31,6 +31,10 @@ const schema = z.object({
   FRONTEND_URL: z.string().url().default('https://zero-kappa-mocha.vercel.app'),
   // Comma-separated extra origins allowed for CORS (e.g. local dev servers)
   FRONTEND_URLS_EXTRA: z.string().optional(),
+  // Comma-separated list of Zero-team emails allowed into the internal admin
+  // dashboard (managing clinics' manual WhatsApp connection). These are
+  // platform operators, distinct from a clinic's own ADMIN staff role.
+  PLATFORM_ADMIN_EMAILS: z.string().optional(),
   JOB_SECRET: z.string().min(16),
 });
 

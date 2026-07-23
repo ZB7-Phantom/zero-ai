@@ -12,6 +12,7 @@ import {
 import { sendEmail } from '../../services/email';
 import { AuthenticatedRequest } from '../../types';
 import { logger } from '../../config/logger';
+import { isPlatformAdminEmail } from '../../middleware/auth';
 
 export async function register(req: Request, res: Response, next: NextFunction) {
   try {
@@ -272,6 +273,12 @@ export async function getMe(
       (staff.clinic.address && staff.clinic.services.length > 0)
     );
 
-    res.json({ staff, clinic: staff.clinic, onboardingComplete });
+    res.json({
+      staff,
+      clinic: staff.clinic,
+      onboardingComplete,
+      // Whether this user may open the internal Zero admin dashboard.
+      isPlatformAdmin: isPlatformAdminEmail(staff.email),
+    });
   } catch (err) { next(err); }
 }

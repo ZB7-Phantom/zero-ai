@@ -55,11 +55,12 @@ enum PlanTier {
   NAVIGATOR 
   ENTERPRISE 
 }
-enum WhatsAppStatus { 
-  NOT_CONNECTED 
-  VERIFICATION_PENDING 
-  CONNECTED 
-  SANDBOX 
+enum WhatsAppStatus {
+  NOT_CONNECTED
+  VERIFICATION_PENDING   // clinic submitted their number, waiting on the Zero team
+  AWAITING_OTP           // Zero team triggered Meta; a code was sent, clinic must enter it
+  CONNECTED
+  SANDBOX
 }
 
 // One row per clinic. The root of all multi-tenancy.
@@ -77,6 +78,19 @@ model Clinic {
   phoneNumberId    String? @unique
   phoneNumber      String?
   metaAccessToken  String?
+
+  // ── Manual "concierge" WhatsApp onboarding ──────────────────────────────
+  // Used when we connect clinics by hand on our own Meta Business Account
+  // instead of Meta's self-serve Embedded Signup. The clinic submits their
+  // number, our team adds it to our WABA, Meta texts them a code, and they
+  // relay it back through the dashboard for us to enter on Meta's side.
+  whatsappRequestedNumber String?   // the number the clinic asked us to connect
+  whatsappSetupChoice     String?   // 'new' | 'migrate' — from the two onboarding questions
+  whatsappNotifyEmail     String?   // where to email them progress updates
+  whatsappRequestedAt     DateTime? // when they submitted the request
+  whatsappClinicReadyAt   DateTime? // when they clicked "I'm ready to receive my code"
+  whatsappOtpCode         String?   // the code they entered; our team reads it, then it's cleared
+  whatsappOtpSubmittedAt  DateTime? // when they entered it (so we can spot expired codes)
 
   plan              PlanTier  @default(STARTER)
   planExpiresAt     DateTime?

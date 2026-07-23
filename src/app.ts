@@ -20,6 +20,7 @@ import appointmentsRouter from './modules/appointments/router';
 import conversationsRouter from './modules/conversations/router';
 import notificationsRouter from './modules/notifications/router';
 import analyticsRouter from './modules/analytics/router';
+import adminRouter from './modules/admin/router';
 import { startSchedulers } from './services/scheduler';
 const app = express();
 app.set('trust proxy', 1);
@@ -85,6 +86,7 @@ app.use('/api/appointments', appointmentsRouter);
 app.use('/api/conversations', conversationsRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/analytics', analyticsRouter);
+app.use('/api/admin', adminRouter);
 app.use('/webhook', webhookRouter);
 
 app.use(errorHandler); // Must be last

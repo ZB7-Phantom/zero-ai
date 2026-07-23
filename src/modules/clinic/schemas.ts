@@ -25,6 +25,22 @@ export const UpdateClinicSchema = z.object({
   dailySummaryEmail: z.boolean().optional(),
 });
 
+// ── Manual WhatsApp connection (concierge flow) ────────────────────────────
+
+// Clinic submits the number they want us to connect, plus a contact email and
+// which onboarding branch they picked. Phone kept loose (E.164-ish) since
+// clinics enter numbers in many formats; we normalise/clean on our side.
+export const RequestWhatsAppSchema = z.object({
+  phoneNumber: z.string().trim().min(6, 'Enter a valid WhatsApp number').max(20),
+  email: z.string().email('Enter a valid email'),
+  setupChoice: z.enum(['new', 'migrate']),
+});
+
+// Clinic relays the 6-digit code Meta sent them. Allow 4–8 digits to be safe.
+export const SubmitOtpSchema = z.object({
+  code: z.string().trim().regex(/^\d{4,8}$/, 'Enter the numeric code Meta sent you'),
+});
+
 // Normalises frontend field names to internal DB field names
 export function normaliseClinicUpdate(raw: z.infer<typeof UpdateClinicSchema>) {
   return {
