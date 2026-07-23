@@ -84,6 +84,12 @@ export async function login(req: Request, res: Response, next: NextFunction) {
     const valid = await bcrypt.compare(password, staff.passwordHash);
     if (!valid) throw new AppError(401, 'Invalid credentials', 'INVALID_CREDENTIALS');
 
+    // Block login for suspended clinics, unless this is a platform admin (who
+    // needs to get in to reactivate them).
+    if (staff.clinic.suspendedAt && !isPlatformAdminEmail(staff.email)) {
+      throw new AppError(403, 'This clinic has been suspended. Please contact support.', 'CLINIC_SUSPENDED');
+    }
+
     // Update last login timestamp
     await prisma.staffMember.update({
       where: { id: staff.id },

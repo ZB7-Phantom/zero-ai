@@ -103,6 +103,10 @@ model Clinic {
 
   onboardingCompletedAt DateTime?
 
+  // Set by a platform admin to switch a clinic off: its staff can't log in and
+  // Zero stops answering its patients on WhatsApp. Null = active.
+  suspendedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

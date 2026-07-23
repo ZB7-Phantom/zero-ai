@@ -20,6 +20,12 @@ export async function authenticate(req: AuthenticatedRequest, _res: Response, ne
     if (!staff?.isActive || staff.clinicId !== clinicId)
       throw new AppError(401, 'Invalid or expired session', 'TOKEN_INVALID');
 
+    // A suspended clinic is switched off — block its staff, except platform
+    // admins (who need access to reactivate it from the admin console).
+    if (staff.clinic.suspendedAt && !isPlatformAdminEmail(staff.email)) {
+      throw new AppError(403, 'This clinic has been suspended. Please contact support.', 'CLINIC_SUSPENDED');
+    }
+
     req.staff = staff;
     req.clinic = staff.clinic;
     next();

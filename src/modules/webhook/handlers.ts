@@ -84,10 +84,17 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
         });
 
         if (!clinic) {
-          logger.warn('Unknown phoneNumberId — message dropped', { 
+          logger.warn('Unknown phoneNumberId — message dropped', {
             phoneNumberId,
             receivedId: phoneNumberId,
           });
+          continue;
+        }
+
+        // Suspended clinics are switched off — Zero goes silent for their
+        // patients (a platform admin can reactivate them from the admin console).
+        if (clinic.suspendedAt) {
+          logger.info('Clinic suspended — inbound message ignored', { clinicId: clinic.id });
           continue;
         }
 

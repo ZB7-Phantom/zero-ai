@@ -42,9 +42,141 @@ function formatPipelineClinic(c: any) {
   };
 }
 
-// GET /api/admin/clinics — clinics currently moving through (or done with) the
-// manual connection flow. Skips clinics that never started it.
-export async function listClinics(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+// GET /api/admin/overview — platform-wide health tiles.
+export async function overview(_req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const [clinics, suspended, whatsappConnected, patients, conversations, staff, newThisMonth] =
+      await Promise.all([
+        prisma.clinic.count(),
+        prisma.clinic.count({ where: { suspendedAt: { not: null } } }),
+        prisma.clinic.count({ where: { whatsappStatus: 'CONNECTED' } }),
+        prisma.patient.count(),
+        prisma.conversation.count(),
+        prisma.staffMember.count(),
+        prisma.clinic.count({ where: { createdAt: { gte: startOfMonth } } }),
+      ]);
+
+    res.json({
+      clinics,
+      active: clinics - suspended,
+      suspended,
+      whatsappConnected,
+      patients,
+      conversations,
+      staff,
+      newThisMonth,
+    });
+  } catch (err) { next(err); }
+}
+
+// GET /api/admin/clinics — every clinic, with the counts the console table needs.
+export async function listAllClinics(_req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const clinics = await prisma.clinic.findMany({
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true, name: true, plan: true, whatsappStatus: true,
+        suspendedAt: true, createdAt: true,
+        _count: { select: { patients: true, staffMembers: true } },
+        staffMembers: {
+          where: { role: 'ADMIN' },
+          select: { email: true },
+          orderBy: { createdAt: 'asc' },
+          take: 1,
+        },
+      },
+    });
+
+    res.json(clinics.map((c) => ({
+      id: c.id,
+      name: c.name,
+      plan: c.plan,
+      whatsappStatus: c.whatsappStatus,
+      suspended: !!c.suspendedAt,
+      adminEmail: c.staffMembers[0]?.email ?? null,
+      patientCount: c._count.patients,
+      staffCount: c._count.staffMembers,
+      createdAt: c.createdAt,
+    })));
+  } catch (err) { next(err); }
+}
+
+// GET /api/admin/clinics/:id — full detail for one clinic.
+export async function getClinicDetail(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const id = req.params.id as string;
+    const c = await prisma.clinic.findUnique({
+      where: { id },
+      include: {
+        staffMembers: {
+          select: { id: true, fullName: true, email: true, role: true, isActive: true, lastLoginAt: true },
+          orderBy: { createdAt: 'asc' },
+        },
+        _count: { select: { patients: true, appointments: true, conversations: true } },
+      },
+    });
+    if (!c) throw new AppError(404, 'Clinic not found', 'NOT_FOUND');
+
+    res.json({
+      id: c.id,
+      name: c.name,
+      address: c.address,
+      services: c.services,
+      openDays: c.openDays,
+      opensAt: c.opensAt,
+      closesAt: c.closesAt,
+      plan: c.plan,
+      planExpiresAt: c.planExpiresAt,
+      whatsappStatus: c.whatsappStatus,
+      phoneNumber: c.phoneNumber,
+      phoneNumberId: c.phoneNumberId,
+      suspended: !!c.suspendedAt,
+      suspendedAt: c.suspendedAt,
+      onboardingCompletedAt: c.onboardingCompletedAt,
+      createdAt: c.createdAt,
+      staff: c.staffMembers,
+      counts: {
+        patients: c._count.patients,
+        appointments: c._count.appointments,
+        conversations: c._count.conversations,
+      },
+    });
+  } catch (err) { next(err); }
+}
+
+// POST /api/admin/clinics/:id/suspend — switch a clinic off.
+export async function suspendClinic(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const id = req.params.id as string;
+    const existing = await prisma.clinic.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) throw new AppError(404, 'Clinic not found', 'NOT_FOUND');
+
+    await prisma.clinic.update({ where: { id }, data: { suspendedAt: new Date() } });
+    logger.info('Admin suspended clinic', { clinicId: id, by: req.staff.email });
+    res.json({ id, suspended: true });
+  } catch (err) { next(err); }
+}
+
+// POST /api/admin/clinics/:id/reactivate — switch a clinic back on.
+export async function reactivateClinic(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const id = req.params.id as string;
+    const existing = await prisma.clinic.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) throw new AppError(404, 'Clinic not found', 'NOT_FOUND');
+
+    await prisma.clinic.update({ where: { id }, data: { suspendedAt: null } });
+    logger.info('Admin reactivated clinic', { clinicId: id, by: req.staff.email });
+    res.json({ id, suspended: false });
+  } catch (err) { next(err); }
+}
+
+// GET /api/admin/whatsapp-pipeline — clinics currently moving through (or done
+// with) the manual WhatsApp connection flow. Skips clinics that never started it.
+export async function whatsappPipeline(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   try {
     const clinics = await prisma.clinic.findMany({
       where: {
