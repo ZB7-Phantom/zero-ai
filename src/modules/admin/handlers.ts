@@ -20,6 +20,7 @@ import { AppError } from '../../middleware/errorHandler';
 import { AuthenticatedRequest } from '../../types';
 import { MarkConnectedSchema, ChangePlanSchema } from './schemas';
 import { PLAN_PRICES, PLAN_ORDER } from './pricing';
+import { recordAudit } from '../../services/audit/log';
 import {
   notifyClinicEnterOtp,
   notifyClinicConnected,
@@ -119,7 +120,7 @@ export async function changePlan(req: AuthenticatedRequest, res: Response, next:
     const id = req.params.id as string;
     const { plan, planExpiresAt } = ChangePlanSchema.parse(req.body);
 
-    const existing = await prisma.clinic.findUnique({ where: { id }, select: { id: true } });
+    const existing = await prisma.clinic.findUnique({ where: { id }, select: { id: true, name: true, plan: true } });
     if (!existing) throw new AppError(404, 'Clinic not found', 'NOT_FOUND');
 
     const data: { plan: typeof plan; planExpiresAt?: Date | null } = { plan };
@@ -129,6 +130,13 @@ export async function changePlan(req: AuthenticatedRequest, res: Response, next:
 
     const updated = await prisma.clinic.update({ where: { id }, data });
     logger.info('Admin changed plan', { clinicId: id, plan, by: req.staff.email });
+    await recordAudit({
+      actorEmail: req.staff.email,
+      action: 'clinic.plan_change',
+      clinicId: id,
+      clinicName: existing.name,
+      detail: existing.plan === plan ? `${plan}` : `${existing.plan} → ${plan}`,
+    });
     res.json({ id, plan: updated.plan, planExpiresAt: updated.planExpiresAt });
   } catch (err) { next(err); }
 }
@@ -212,11 +220,12 @@ export async function getClinicDetail(req: AuthenticatedRequest, res: Response, 
 export async function suspendClinic(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   try {
     const id = req.params.id as string;
-    const existing = await prisma.clinic.findUnique({ where: { id }, select: { id: true } });
+    const existing = await prisma.clinic.findUnique({ where: { id }, select: { id: true, name: true } });
     if (!existing) throw new AppError(404, 'Clinic not found', 'NOT_FOUND');
 
     await prisma.clinic.update({ where: { id }, data: { suspendedAt: new Date() } });
     logger.info('Admin suspended clinic', { clinicId: id, by: req.staff.email });
+    await recordAudit({ actorEmail: req.staff.email, action: 'clinic.suspend', clinicId: id, clinicName: existing.name });
     res.json({ id, suspended: true });
   } catch (err) { next(err); }
 }
@@ -225,11 +234,12 @@ export async function suspendClinic(req: AuthenticatedRequest, res: Response, ne
 export async function reactivateClinic(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   try {
     const id = req.params.id as string;
-    const existing = await prisma.clinic.findUnique({ where: { id }, select: { id: true } });
+    const existing = await prisma.clinic.findUnique({ where: { id }, select: { id: true, name: true } });
     if (!existing) throw new AppError(404, 'Clinic not found', 'NOT_FOUND');
 
     await prisma.clinic.update({ where: { id }, data: { suspendedAt: null } });
     logger.info('Admin reactivated clinic', { clinicId: id, by: req.staff.email });
+    await recordAudit({ actorEmail: req.staff.email, action: 'clinic.reactivate', clinicId: id, clinicName: existing.name });
     res.json({ id, suspended: false });
   } catch (err) { next(err); }
 }
@@ -277,6 +287,7 @@ export async function sendOtp(req: AuthenticatedRequest, res: Response, next: Ne
     });
 
     logger.info('Admin triggered OTP send', { clinicId: id, by: req.staff.email });
+    await recordAudit({ actorEmail: req.staff.email, action: 'whatsapp.send_code', clinicId: id, clinicName: clinic.name });
     notifyClinicEnterOtp(clinic);
 
     res.json(formatPipelineClinic(clinic));
@@ -319,6 +330,7 @@ export async function markConnected(req: AuthenticatedRequest, res: Response, ne
     });
 
     logger.info('Admin marked clinic connected', { clinicId: id, by: req.staff.email });
+    await recordAudit({ actorEmail: req.staff.email, action: 'whatsapp.mark_connected', clinicId: id, clinicName: clinic.name, detail: phoneNumberId });
     notifyClinicConnected(clinic);
 
     res.json(formatPipelineClinic(clinic));
@@ -347,6 +359,104 @@ export async function resetConnection(req: AuthenticatedRequest, res: Response, 
     });
 
     logger.info('Admin reset clinic WhatsApp connection', { clinicId: id, by: req.staff.email });
+    await recordAudit({ actorEmail: req.staff.email, action: 'whatsapp.reset', clinicId: id, clinicName: clinic.name });
     res.json(formatPipelineClinic(clinic));
+  } catch (err) { next(err); }
+}
+
+// ── Audit log ────────────────────────────────────────────────────────────────
+
+// GET /api/admin/audit — most recent admin actions (optionally for one clinic).
+export async function listAudit(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const clinicId = (req.query.clinicId as string | undefined) || undefined;
+    const entries = await prisma.adminAuditLog.findMany({
+      where: clinicId ? { clinicId } : {},
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    res.json(entries);
+  } catch (err) { next(err); }
+}
+
+// ── Staff lookup ─────────────────────────────────────────────────────────────
+
+function formatStaff(s: any) {
+  return {
+    id: s.id,
+    fullName: s.fullName,
+    email: s.email,
+    role: s.role,
+    isActive: s.isActive,
+    lastLoginAt: s.lastLoginAt,
+    clinic: s.clinic ? { id: s.clinic.id, name: s.clinic.name } : null,
+  };
+}
+
+// GET /api/admin/staff?q= — search staff across every clinic by name or email.
+export async function listStaff(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const q = ((req.query.q as string | undefined) || '').trim();
+    const staff = await prisma.staffMember.findMany({
+      where: q
+        ? {
+            OR: [
+              { email: { contains: q, mode: 'insensitive' } },
+              { fullName: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : {},
+      include: { clinic: { select: { id: true, name: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    res.json(staff.map(formatStaff));
+  } catch (err) { next(err); }
+}
+
+// POST /api/admin/staff/:id/deactivate — disable a staff member's login.
+export async function deactivateStaff(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const id = req.params.id as string;
+    const staff = await prisma.staffMember.findUnique({
+      where: { id },
+      include: { clinic: { select: { name: true } } },
+    });
+    if (!staff) throw new AppError(404, 'Staff member not found', 'NOT_FOUND');
+    if (staff.email.toLowerCase() === req.staff.email.toLowerCase()) {
+      throw new AppError(400, "You can't deactivate your own account", 'SELF_DEACTIVATE');
+    }
+
+    await prisma.staffMember.update({ where: { id }, data: { isActive: false } });
+    await recordAudit({
+      actorEmail: req.staff.email,
+      action: 'staff.deactivate',
+      clinicId: staff.clinicId,
+      clinicName: staff.clinic?.name,
+      detail: staff.email,
+    });
+    res.json({ id, isActive: false });
+  } catch (err) { next(err); }
+}
+
+// POST /api/admin/staff/:id/activate — re-enable a staff member's login.
+export async function activateStaff(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const id = req.params.id as string;
+    const staff = await prisma.staffMember.findUnique({
+      where: { id },
+      include: { clinic: { select: { name: true } } },
+    });
+    if (!staff) throw new AppError(404, 'Staff member not found', 'NOT_FOUND');
+
+    await prisma.staffMember.update({ where: { id }, data: { isActive: true } });
+    await recordAudit({
+      actorEmail: req.staff.email,
+      action: 'staff.activate',
+      clinicId: staff.clinicId,
+      clinicName: staff.clinic?.name,
+      detail: staff.email,
+    });
+    res.json({ id, isActive: true });
   } catch (err) { next(err); }
 }

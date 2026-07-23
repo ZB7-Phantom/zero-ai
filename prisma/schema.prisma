@@ -285,6 +285,23 @@ model ConversationMessage {
   @@index([conversationId])
 }
 
+// Append-only record of platform-admin actions (suspend, plan change, WhatsApp
+// connect steps, staff changes). Deliberately not FK'd to Clinic so entries
+// survive clinic deletion; the clinic name is captured at write time.
+model AdminAuditLog {
+  id         String   @id @default(uuid())
+  actorEmail String   // which platform admin did it
+  action     String   // e.g. "clinic.suspend", "clinic.plan_change"
+  clinicId   String?
+  clinicName String?
+  detail     String?  // short human-readable summary
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([clinicId])
+}
+
 model Notification {
   id       String @id @default(uuid())
   clinicId String
