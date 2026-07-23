@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate, requirePlatformAdmin } from '../../middleware/auth';
 import {
   overview, listAllClinics, getClinicDetail, suspendClinic, reactivateClinic,
+  billing, changePlan,
   whatsappPipeline, sendOtp, markConnected, resetConnection,
 } from './handlers';
 
@@ -17,6 +18,10 @@ router.get('/clinics', ...guard, listAllClinics as any);
 router.get('/clinics/:id', ...guard, getClinicDetail as any);
 router.post('/clinics/:id/suspend', ...guard, suspendClinic as any);
 router.post('/clinics/:id/reactivate', ...guard, reactivateClinic as any);
+
+// Billing
+router.get('/billing', ...guard, billing as any);
+router.post('/clinics/:id/plan', ...guard, changePlan as any);
 
 // WhatsApp connection pipeline
 router.get('/whatsapp-pipeline', ...guard, whatsappPipeline as any);

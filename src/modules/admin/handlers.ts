@@ -18,7 +18,8 @@ import { prisma } from '../../config/database';
 import { logger } from '../../config/logger';
 import { AppError } from '../../middleware/errorHandler';
 import { AuthenticatedRequest } from '../../types';
-import { MarkConnectedSchema } from './schemas';
+import { MarkConnectedSchema, ChangePlanSchema } from './schemas';
+import { PLAN_PRICES, PLAN_ORDER } from './pricing';
 import {
   notifyClinicEnterOtp,
   notifyClinicConnected,
@@ -49,7 +50,7 @@ export async function overview(_req: AuthenticatedRequest, res: Response, next: 
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const [clinics, suspended, whatsappConnected, patients, conversations, staff, newThisMonth] =
+    const [clinics, suspended, whatsappConnected, patients, conversations, staff, newThisMonth, activeByPlan] =
       await Promise.all([
         prisma.clinic.count(),
         prisma.clinic.count({ where: { suspendedAt: { not: null } } }),
@@ -58,7 +59,10 @@ export async function overview(_req: AuthenticatedRequest, res: Response, next: 
         prisma.conversation.count(),
         prisma.staffMember.count(),
         prisma.clinic.count({ where: { createdAt: { gte: startOfMonth } } }),
+        prisma.clinic.groupBy({ by: ['plan'], where: { suspendedAt: null }, _count: true }),
       ]);
+
+    const mrr = activeByPlan.reduce((sum, g) => sum + PLAN_PRICES[g.plan] * g._count, 0);
 
     res.json({
       clinics,
@@ -69,7 +73,63 @@ export async function overview(_req: AuthenticatedRequest, res: Response, next: 
       conversations,
       staff,
       newThisMonth,
+      mrr,
     });
+  } catch (err) { next(err); }
+}
+
+// GET /api/admin/billing — plan breakdown, MRR, and renewals/expired lists.
+export async function billing(_req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const now = new Date();
+    const in14days = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+
+    const grouped = await prisma.clinic.groupBy({
+      by: ['plan'], where: { suspendedAt: null }, _count: true,
+    });
+
+    const byPlan = PLAN_ORDER.map((plan) => {
+      const count = grouped.find((g) => g.plan === plan)?._count ?? 0;
+      const monthly = PLAN_PRICES[plan];
+      return { plan, count, monthly, revenue: count * monthly };
+    });
+    const mrr = byPlan.reduce((s, b) => s + b.revenue, 0);
+
+    const summarySelect = { id: true, name: true, plan: true, planExpiresAt: true } as const;
+    const [renewalsDue, expired] = await Promise.all([
+      prisma.clinic.findMany({
+        where: { suspendedAt: null, planExpiresAt: { gte: now, lte: in14days } },
+        select: summarySelect,
+        orderBy: { planExpiresAt: 'asc' },
+      }),
+      prisma.clinic.findMany({
+        where: { suspendedAt: null, planExpiresAt: { lt: now } },
+        select: summarySelect,
+        orderBy: { planExpiresAt: 'asc' },
+      }),
+    ]);
+
+    res.json({ mrr, byPlan, renewalsDue, expired });
+  } catch (err) { next(err); }
+}
+
+// POST /api/admin/clinics/:id/plan — manual plan override.
+export async function changePlan(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  try {
+    const id = req.params.id as string;
+    const { plan, planExpiresAt } = ChangePlanSchema.parse(req.body);
+
+    const existing = await prisma.clinic.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) throw new AppError(404, 'Clinic not found', 'NOT_FOUND');
+
+    const data: { plan: typeof plan; planExpiresAt?: Date | null } = { plan };
+    if (planExpiresAt !== undefined) {
+      data.planExpiresAt = planExpiresAt ? new Date(planExpiresAt) : null;
+    }
+
+    const updated = await prisma.clinic.update({ where: { id }, data });
+    logger.info('Admin changed plan', { clinicId: id, plan, by: req.staff.email });
+    res.json({ id, plan: updated.plan, planExpiresAt: updated.planExpiresAt });
   } catch (err) { next(err); }
 }
 
