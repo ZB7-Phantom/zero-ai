@@ -165,6 +165,12 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             history: [],
           };
 
+          logger.info(`Loaded state: ${JSON.stringify({
+            state: currentState.state,
+            dataKeys: Object.keys(currentState.data || {}),
+            data: currentState.data,
+          })}`);
+
           // If previous session was complete or idle, reset data and
           // history so Zero starts the new conversation clean
           // Reset if the last session was complete, idle, or if
@@ -306,10 +312,10 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             }),
           ]);
 
-          logger.info('Conversation state saved', {
-            newState: newState.state,
-            dataKeys: Object.keys(newState.data),
-          });
+          logger.info(`Saved state: ${JSON.stringify({
+            state: newState.state,
+            dataKeys: Object.keys(newState.data || {}),
+          })}`);
 
           let finalReply = result.reply;
 
