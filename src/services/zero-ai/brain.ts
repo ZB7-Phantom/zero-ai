@@ -32,6 +32,7 @@ export interface BrainResult {
   escalationReason: string | null;
   department?: string;
   urgency?: string;
+  nextState: string;
 }
 
 export interface IntakeData {
@@ -135,6 +136,7 @@ const ESCALATION_PATTERNS = [
   /\b(coughing (with|and) (blood|heart|chest pain))\b/,
   /\b(i (want to|will) sue|i'm (furious|livid|disgusted)|worst (clinic|service))\b/,
   /\b(insurance|hmo|nhis|billing (error|dispute)|refuse to pay)\b/,
+  /\b(human|real person|speak to (someone|a person)|talk to (a )?(human|person|staff)|need (a )?human|human (agent|staff)|speak (with|to) staff)\b/,
 ];
 
 // ─── LAYER 3: ESCALATION DETECTOR ─────────────────────────────────────────────
@@ -684,6 +686,7 @@ export async function processMessage(
         escalationReason: reason,
         urgency: 'HIGH',
         department: 'General',
+        nextState: state.state,
       };
     }
 
@@ -832,6 +835,7 @@ export async function processMessage(
       escalationReason: null,
       department,
       urgency,
+      nextState: finalNextState,
     };
 
   } catch (err) {
@@ -842,6 +846,7 @@ export async function processMessage(
       isComplete: false,
       escalate: false,
       escalationReason: null,
+      nextState: state.state,
     };
   }
 }

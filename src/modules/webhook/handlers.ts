@@ -5,7 +5,7 @@ import { logger } from '../../config/logger';
 import { env } from '../../config/env';
 import { io } from '../../app';
 import { sendWhatsAppMessage } from '../../services/whatsapp/client';
-import { processMessage, getNextState } from '../../services/zero-ai/brain';
+import { processMessage } from '../../services/zero-ai/brain';
 import { AiConversationState } from '../../types';
 import { EscalationReason } from '@prisma/client';
 import { assignQueueNumber } from '../queue/handlers';
@@ -240,18 +240,6 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           ].slice(-50); // Keep last 50 turns maximum — full history
                         // is always in ConversationMessage table
 
-          const norm = messageText.toLowerCase().trim();
-          const intent = (() => {
-            if (/^[1]$/.test(norm)) return 'WALKIN';
-            if (/^[2]$/.test(norm)) return 'APPOINTMENT';
-            if (/^[3]$/.test(norm)) return 'ON_MY_WAY';
-            if (/^[4]$/.test(norm)) return 'QUEUE_CHECK';
-            if (/^(restart|start over|menu)$/.test(norm)) return 'RESTART';
-            if (!['START','MENU','IDLE','COMPLETE'].includes(currentState.state))
-              return 'PROVIDING_DATA';
-            return 'UNKNOWN';
-          })() as any;
-
           const mergedData = {
             ...currentState.data,
             ...Object.fromEntries(
@@ -259,11 +247,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             ),
           };
 
-
-
-          const nextStateName = result.isComplete
-            ? 'COMPLETE'
-            : getNextState(currentState.state, intent, mergedData);
+          const nextStateName = result.nextState;
 
 
 
