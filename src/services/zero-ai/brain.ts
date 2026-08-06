@@ -354,7 +354,7 @@ async function callGemini(
   }`;
 
   const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
+    model: env.GEMINI_MODEL,
     systemInstruction: systemPrompt,
     generationConfig: {
       responseMimeType: 'application/json',
