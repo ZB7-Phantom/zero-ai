@@ -73,6 +73,10 @@ app.use(express.urlencoded({ extended: true }));
 app.use(requestLogger);
 app.use(globalLimiter);
 
+app.get('/health', (_req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
 app.get('/', (_req, res) => {
   res.json({ status: 'Zero API running', version: '1.0.0', env: env.NODE_ENV });
 });
@@ -92,16 +96,16 @@ app.use('/webhook', webhookRouter);
 app.use(errorHandler); // Must be last
 
 async function start() {
-  await prisma.$connect();
-  logger.info('Database connected');
-
-  // Bind port first so Railway health check succeeds immediately
+  // Bind port first on 0.0.0.0 so Railway health check succeeds immediately
   await new Promise<void>((resolve) => {
-    server.listen(parseInt(env.PORT), () => {
+    server.listen(parseInt(env.PORT, 10), '0.0.0.0', () => {
       logger.info(`Zero API on port ${env.PORT}`);
       resolve();
     });
   });
+
+  await prisma.$connect();
+  logger.info('Database connected');
 
   // Schedulers — in-process cron, no Redis dependency
   startSchedulers();
