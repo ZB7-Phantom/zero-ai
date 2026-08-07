@@ -10,19 +10,32 @@ export async function sendWhatsAppMessage(
   phoneNumberId: string,
   to: string,
   text: string,
-  accessToken?: string  // clinic-specific token if available
+  accessToken?: string // clinic-specific token if available
 ): Promise<void> {
+  // Clean recipient phone: strip '+' and non-digits, convert local 0x to 234x
+  let cleanTo = to.replace(/\D/g, '');
+  if (cleanTo.startsWith('0') && cleanTo.length === 11) {
+    cleanTo = '234' + cleanTo.slice(1);
+  }
+
   // Use clinic token if provided, fall back to global token
-  const token = accessToken || env.META_ACCESS_TOKEN;
+  const token = (accessToken && accessToken.trim().length > 0) ? accessToken.trim() : env.META_ACCESS_TOKEN;
+
+  logger.info(`Sending WhatsApp message to ${cleanTo} via phoneId ${phoneNumberId}`, {
+    tokenPrefix: token ? `${token.slice(0, 12)}...` : 'MISSING',
+    usingClinicToken: !!(accessToken && accessToken.trim().length > 0),
+    messageLength: text.length,
+  });
 
   try {
-    await axios.post(
+    const res = await axios.post(
       `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
-        to,
+        recipient_type: 'individual',
+        to: cleanTo,
         type: 'text',
-        text: { body: text },
+        text: { preview_url: false, body: text },
       },
       {
         headers: {
@@ -31,12 +44,19 @@ export async function sendWhatsAppMessage(
         },
       }
     );
+
+    logger.info('WhatsApp message delivered to Meta API successfully', {
+      to: cleanTo,
+      messageId: res.data?.messages?.[0]?.id,
+    });
   } catch (err: any) {
-    // Log but never throw — a failed send should not crash the webhook handler
+    const errorData = err.response?.data?.error || err.response?.data || err.message;
     logger.error('WhatsApp send failed', {
-      to,
+      to: cleanTo,
       phoneNumberId,
-      error: err.response?.data || err.message,
+      status: err.response?.status,
+      metaError: typeof errorData === 'object' ? JSON.stringify(errorData) : errorData,
     });
   }
 }
+
