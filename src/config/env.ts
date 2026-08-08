@@ -11,7 +11,7 @@ const schema = z.object({
   JWT_SECRET: z.string().min(32),
   JWT_EXPIRES_IN: z.string().default('7d'),
   GEMINI_API_KEY: z.string().min(1),
-  GEMINI_MODEL: z.string().default('gemini-1.5-flash'),
+  GEMINI_MODEL: z.string().default('gemini-3.1-flash-lite'),
   META_APP_ID: z.string().min(1),
   META_ACCESS_TOKEN: z.string().min(1),
   META_VERIFY_TOKEN: z.string().min(1),
