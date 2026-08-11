@@ -30,11 +30,14 @@ const server = http.createServer(app);
 // Allow the configured frontend plus any extra origins (e.g. local dev servers).
 // In non-production, common Vite/CRA localhost ports are allowed automatically
 // so the frontend can be developed against the deployed backend.
+// We also explicitly allow localhost:3000 always so the dashboard can be tested locally against prod.
 const allowedOrigins = new Set([
   env.FRONTEND_URL,
+  'http://localhost:3000',
+  'http://localhost:3001',
   ...(env.FRONTEND_URLS_EXTRA?.split(',').map((o) => o.trim()).filter(Boolean) ?? []),
   ...(env.NODE_ENV !== 'production'
-    ? ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000']
+    ? ['http://localhost:5173', 'http://127.0.0.1:5173']
     : []),
 ]);
 
