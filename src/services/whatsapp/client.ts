@@ -64,7 +64,13 @@ export async function sendWhatsAppMessage(
   }
 }
 
-export async function markReadAndShowTyping(phoneNumberId: string, messageId: string) {
+export async function markReadAndShowTyping(
+  phoneNumberId: string, 
+  messageId: string,
+  accessToken?: string
+) {
+  const token = (accessToken && accessToken.trim().length > 0) ? accessToken.trim() : env.META_ACCESS_TOKEN;
+
   try {
     await axios.post(
       `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
@@ -74,9 +80,10 @@ export async function markReadAndShowTyping(phoneNumberId: string, messageId: st
         message_id: messageId,
         typing_indicator: { type: 'text' },
       },
-      { headers: { Authorization: `Bearer ${env.META_ACCESS_TOKEN}` } }
+      { headers: { Authorization: `Bearer ${token}` } }
     );
   } catch (err: any) {
-    logger.warn('Failed to mark read / show typing', { error: err.message });
+    const errorData = err.response?.data?.error || err.response?.data || err.message;
+    logger.warn('Failed to mark read', { error: typeof errorData === 'object' ? JSON.stringify(errorData) : errorData });
   }
 }
