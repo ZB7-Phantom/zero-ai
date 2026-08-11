@@ -64,3 +64,19 @@ export async function sendWhatsAppMessage(
   }
 }
 
+export async function markReadAndShowTyping(phoneNumberId: string, messageId: string) {
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        status: 'read',
+        message_id: messageId,
+        typing_indicator: { type: 'text' },
+      },
+      { headers: { Authorization: `Bearer ${env.META_ACCESS_TOKEN}` } }
+    );
+  } catch (err: any) {
+    logger.warn('Failed to mark read / show typing', { error: err.message });
+  }
+}

@@ -281,66 +281,42 @@ async function callGemini(
   clinic: Clinic
 ): Promise<{ reply: string; extracted: Partial<IntakeData> }> {
   const systemPrompt = `You are Zero, the AI patient assistant for ${clinic.name}.
-  You are warm, attentive, and calm — like a trusted friend
-  who works at the clinic. Think Baymax: caring, gentle,
-  never rushing, always making the patient feel heard.
+  You are a knowledgeable peer and fluid super-connector. Think of a mix of OpenAI
+  and Pixar. You communicate via WhatsApp, so your texts should be concise, modern,
+  and surprisingly human.
 
   YOUR PERSONALITY:
-  - Warm but efficient. You genuinely care about every patient.
-  - You acknowledge what people share before moving forward.
-    A patient who tells you something personal deserves a
-    human response, not just a data collection prompt.
-  - You are sensitive to embarrassing or difficult topics.
-    Handle them with extra care and zero judgment.
-  - You vary your language constantly. You never say the same
-    phrase twice in the same conversation.
-  - You are brief. One thought per message. Never combine
-    two questions.
+  - Warm but highly efficient. You genuinely care, but you speak like a smart human peer, not a robot.
+  - Fluid and casual: always use contractions ("I'm", "you're", "that's", "let's", "here's"). Never use stiff, formal phrasing like "It is", "I am", or "Could you please".
+  - You are sensitive to embarrassing or difficult topics. Handle them with extra care and zero judgment, but keep it conversational.
+  - You vary your language constantly. Never say the same phrase twice.
+  - You are brief. One thought per message.
 
   TONE RULES — read these carefully:
-  - "Thank you" maximum once per conversation. After that,
-    use: "Got it", "I see", "Noted", "Right", "Perfect",
-    "Understood" — pick what fits the moment.
-  - "I am sorry to hear that" maximum once per conversation.
-    After that, show empathy through action, not the phrase.
-  - NEVER say: "It is a pleasure to assist you", "I am here
-    to help", "Allow me to assist", "How may I assist you".
-    These are filler. Go straight to what matters.
+  - Do NOT restate, paraphrase, or mirror what the patient just told you back to them as a summary sentence before responding. A short natural reaction is enough ("That's rough.", "Okay, noted.", "Got it."). Never say "I understand that X has been Y" — that's a mirror, not a reaction.
+  - Maximum ONE emoji per message. Never stack emoji. Most messages need zero emoji.
   - Match the patient's energy. Brief patient → be concise.
-    Patient who shares a lot → acknowledge before asking.
-  - For sensitive topics (sexual health, mental health,
-    personal struggles): lead with warmth and zero judgment
-    before asking any question.
-  - ABSOLUTE RULE: Do NOT express sympathy for illness,
-    pain, or discomfort until the patient has explicitly
-    described a symptom in their own words. Saying "I'm
-    sorry to hear you've been feeling unwell" before the
-    patient mentions any symptom is a violation of patient
-    trust. Wait. Listen first.
-  - When a patient provides a name with a title (Dr., Mrs.,
-    Mr., Prof.), ALWAYS address them using their title and
-    last name. NEVER drop the title or use only the first
-    name. "Dr. Damodred", "Mrs. Okonkwo", "Prof. Williams".
+  - For sensitive topics (sexual health, mental health): lead with warmth before asking a question.
+  - ABSOLUTE RULE: Do NOT express sympathy for illness or pain until the patient has explicitly described a symptom in their own words. Wait. Listen first.
+  - When a patient provides a name with a title (Dr., Mrs., Mr., Prof.), ALWAYS address them using their title and last name. "Dr. Damodred", "Mrs. Okonkwo".
+
+  BANNED PHRASES:
+  - "It is a pleasure to assist you"
+  - "I am here to help"
+  - "Allow me to assist"
+  - "How may I assist you"
+  - "It is a pleasure to meet you"
+  - "It is lovely to connect with you"
+  - "It is lovely to meet you"
+  - "Understood, your details have been noted"
 
   CRITICAL RULES:
-  - Use the patient's name or title AT MOST TWICE in the
-    entire conversation — once when you first learn it,
-    once in the final confirmation. Never in between.
-    Reading "Mrs. Lemin" in every single message is
-    deeply impersonal and robotic.
-  - NEVER ask for information that already exists in the
-    INSTRUCTION context or in the conversation history.
-    If the INSTRUCTION shows the patient's name, age, or
-    any other field — those are already collected. Do not
-    ask for them again under any circumstances.
-  - Follow the INSTRUCTION exactly. If it says ask for name,
-    ask for name and nothing else.
-  - NEVER claim registration is complete, queue is assigned,
-    or appointment is booked unless the INSTRUCTION explicitly
-    says to do so.
+  - Use the patient's name or title AT MOST TWICE in the entire conversation — once when you first learn it, once in the final confirmation. Never in between.
+  - NEVER ask for information that already exists in the INSTRUCTION context or in the conversation history. If the INSTRUCTION shows a field — it is already collected. Do not ask for it again.
+  - Follow the INSTRUCTION exactly. If it says ask for name, ask for name and nothing else.
+  - NEVER claim registration is complete, queue is assigned, or appointment is booked unless the INSTRUCTION explicitly says to do so.
   - NEVER combine two questions in one message.
-  - Extract only data the patient actually provided.
-    Never guess or infer unstated fields.
+  - Extract only data the patient actually provided. Never guess or infer unstated fields.
   - Do not start consecutive replies with the same word.
 
   RESPOND ONLY WITH THIS JSON — no markdown, no explanation:
@@ -543,30 +519,17 @@ This is the final message of the intake flow.`;
       if (data.mode === 'walkin') {
         const { department, urgency } = routeToDepAndUrgency(data);
         const displayComplaint = data.complaint || (data as any).symptoms || 'Not recorded';
-        return `Intake is complete. Before assigning the queue,
-        warmly summarise what was collected and ask the patient
-        to confirm everything is correct. Use this exact format
-        for the summary — do not change the structure, only make
-        the opening line warm and natural:
-    
-        Here is what I have for you, ${firstName}:
-    
-        *Name:* ${data.name}
-        *Age:* ${data.age}
-        *Complaint:* ${displayComplaint}
-        *Department:* ${department}
-        *Urgency:* ${urgency}
-    
-        Is everything correct? Reply *Yes* to confirm or let me
-        know what needs to be updated.
-    
+        return `Intake is complete. Before assigning the queue, summarise what was collected naturally in a single brief sentence, as if you are confirming it on WhatsApp before proceeding. Ask if it is correct.
+        
+        Do not use a bulleted list or form format. Just a casual confirmation like: "Got it, Dr. Carhla. Just to confirm—you're 34, and you've had sharp waist pain for 5 days. Is that all correct?"
+        
         If the patient is responding to a previous summary and wants to correct something, acknowledge what they said and ask for the correct information.
         Do not show the queue number yet — that happens next.`;
       }
       return `The patient is responding to the summary you showed them. If they confirmed (yes/correct/ok), tell them warmly that you are registering them now. If they want to correct something, acknowledge what they said and ask for the correct information. Do not show the queue number yet — that happens next.`;
 
     case 'MENU':
-      return `Greet the patient warmly and show the clinic menu with these exact options:\n1️⃣ Walk-in — join today's queue\n2️⃣ Book an appointment\n3️⃣ I'm on my way to the clinic\n4️⃣ Check my queue number\n\nMention the clinic name *${clinicName}* and your name *Zero*.`;
+      return `Say hi and show the clinic menu with these exact options:\n1️⃣ Walk-in — join today's queue\n2️⃣ Book an appointment\n3️⃣ I'm on my way to the clinic\n4️⃣ Check my queue number\n\nMention the clinic name *${clinicName}* and your name *Zero* casually.`;
 
     case 'COLLECTING_DETAILS': {
       const missing = [];
@@ -576,26 +539,18 @@ This is the final message of the intake flow.`;
   
       if (missing.length === 3) {
         // Nothing collected yet — ask all three at once
-        return `Ask the patient for their full name, age, and
-        gender in a single natural question. Extract all three
-        fields from this message if present. Example tone:
-        "To get you registered, could I get your full name,
-        age, and gender?"`;
+        return `Ask for their full name, age, and gender directly and conversationally. Example tone: "What's your full name, age, and gender?" Extract all three if present.`;
       }
       if (!data.name) {
-        return `Ask for the patient's full name only. Extract
-        it from this message if present.`;
+        return `Ask for their full name naturally. Extract it from this message if present.`;
       }
       if (!data.age) {
-        return `Ask ${(data as any).firstName || 'the patient'}
-        for their age only. Extract it from this message.`;
+        return `Ask ${(data as any).firstName || 'the patient'} for their age naturally. Extract it from this message.`;
       }
       if (!data.gender) {
-        return `Ask for gender — Male, Female, or Prefer not
-        to say. Extract it from this message.`;
+        return `Ask for gender naturally. Extract it from this message.`;
       }
-      return `Ask what brings ${(data as any).firstName || 'them'}
-      to ${clinic.name} today. Extract their complaint.`;
+      return `Ask what brings ${(data as any).firstName || 'them'} to ${clinic.name} today. Extract their complaint.`;
     }
 
     case 'COLLECTING_SYMPTOMS': {
@@ -646,6 +601,24 @@ This is the final message of the intake flow.`;
 
     default:
       return `Respond helpfully to the patient's message.`;
+  }
+}
+
+// Map each state to the field it's actively soliciting —
+// that field is always allowed to be overwritten by this turn's answer,
+// even if already set, because the system itself just asked for it.
+function getActiveField(state: string, data: Partial<IntakeData>): string | null {
+  switch (state) {
+    case 'COLLECTING_DETAILS':
+      if (!data.name) return 'name';
+      if (!data.age) return 'age';
+      if (!data.gender) return 'gender';
+      return 'complaint';
+    case 'COLLECTING_SYMPTOMS': return 'symptoms';
+    case 'COLLECTING_APPOINTMENT_DATE': return 'appointmentDate';
+    case 'COLLECTING_APPOINTMENT_TIME': return 'appointmentTime';
+    case 'AWAITING_CONFIRMATION': return null; // null = allow ANY field to overwrite (patient is correcting)
+    default: return null;
   }
 }
 
@@ -747,12 +720,16 @@ export async function processMessage(
         const extractResult = await callGemini(
           message, state.history, extractionPrompt, clinic
         );
-        // Merge: only take new non-null fields, never overwrite existing
+        // Merge: only take new non-null fields, or overwrite if actively soliciting/correcting
+        const activeField = getActiveField(state.state, state.data);
         for (const [key, val] of Object.entries(extractResult.extracted)) {
-          if (val !== null && val !== undefined && val !== '') {
-            if (!(state.data as any)[key]) {
-              (extracted as any)[key] = val;
-            }
+          if (val === null || val === undefined || val === '') continue;
+          
+          const alreadySet = !!(state.data as any)[key];
+          const isCorrection = state.state === 'AWAITING_CONFIRMATION' || key === activeField;
+          
+          if (!alreadySet || isCorrection) {
+            (extracted as any)[key] = val;
           }
         }
       } catch {

@@ -4,7 +4,7 @@ import { prisma } from '../../config/database';
 import { logger } from '../../config/logger';
 import { env } from '../../config/env';
 import { io } from '../../app';
-import { sendWhatsAppMessage } from '../../services/whatsapp/client';
+import { sendWhatsAppMessage, markReadAndShowTyping } from '../../services/whatsapp/client';
 import { processMessage } from '../../services/zero-ai/brain';
 import { AiConversationState } from '../../types';
 import { EscalationReason } from '@prisma/client';
@@ -105,6 +105,12 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           const patientPhone = msg.from;
           const messageText = msg.text.body;
           const metaMessageId = msg.id;
+
+          try {
+            await markReadAndShowTyping(phoneNumberId, metaMessageId);
+          } catch (err) {
+            // non-fatal, typing indicator failure shouldn't stop processing
+          }
 
           // Deduplicate — Meta sometimes delivers the same message twice
           const alreadyProcessed = await prisma.conversationMessage.findUnique({
