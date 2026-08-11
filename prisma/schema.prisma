@@ -319,3 +319,17 @@ model Notification {
   @@index([clinicId, isRead])
   @@index([clinicId, createdAt])
 }
+
+model DemoLead {
+  id         String   @id @default(uuid())
+  clinicName String
+  contactName String
+  whatsapp   String
+  email      String
+  clinicType String
+  status     String   @default("NEW")
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+}
+
