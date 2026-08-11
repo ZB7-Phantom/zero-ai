@@ -51,12 +51,16 @@ export async function sendWhatsAppMessage(
     });
   } catch (err: any) {
     const errorData = err.response?.data?.error || err.response?.data || err.message;
-    logger.error('WhatsApp send failed', {
+    const metaErrorStr = typeof errorData === 'object' ? JSON.stringify(errorData) : errorData;
+    
+    logger.error(`WhatsApp send failed: ${metaErrorStr}`, {
       to: cleanTo,
       phoneNumberId,
       status: err.response?.status,
-      metaError: typeof errorData === 'object' ? JSON.stringify(errorData) : errorData,
     });
+    
+    // Bubble up so handlers.ts can flag the conversation for review
+    throw err;
   }
 }
 
