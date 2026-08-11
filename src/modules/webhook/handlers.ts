@@ -454,6 +454,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
               conversationId: conversation.id,
               reason: result.escalationReason,
             });
+          }
           } catch (innerErr) {
             logger.error('Message processing error — sending fallback to patient', {
               error: (innerErr as Error).message,
