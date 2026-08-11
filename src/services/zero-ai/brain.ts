@@ -742,11 +742,7 @@ export async function processMessage(
       and robotic. If patient volunteers a number, record it.
       If not, do not ask.`;
 
-    // Skip extraction pass if we are just starting to collect details and message is short
-    const wordCount = norm.split(/\s+/).length;
-    const skipExtraction = state.state === 'COLLECTING_DETAILS' && wordCount < 15;
-
-    if (!skipExtraction) {
+    if (true) {
       try {
         const extractResult = await callGemini(
           message, state.history, extractionPrompt, clinic

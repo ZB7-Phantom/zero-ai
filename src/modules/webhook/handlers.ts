@@ -454,7 +454,45 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
               conversationId: conversation.id,
               reason: result.escalationReason,
             });
-          }
+          } catch (innerErr) {
+            logger.error('Message processing error — sending fallback to patient', {
+              error: (innerErr as Error).message,
+              stack: (innerErr as Error).stack?.slice(0, 500),
+              clinicId: clinic.id,
+              patientPhone,
+            });
+
+            try {
+              await sendWhatsAppMessage(
+                phoneNumberId,
+                patientPhone,
+                "Sorry — having a technical hiccup. A staff member will follow up with you shortly.",
+                clinic.metaAccessToken || undefined
+              );
+
+              await prisma.conversation.update({
+                where: { id: conversation.id },
+                data: {
+                  status: 'NEEDS_REVIEW',
+                  isAiPaused: true,
+                },
+              });
+
+              await createNotification({
+                clinicId: clinic.id,
+                type: 'escalation',
+                title: 'Technical Error - Patient message dropped',
+                body: `An error occurred while processing a message from ${patientPhone}. AI is paused.`,
+                metadata: {
+                  conversationId: conversation.id,
+                  patientPhone,
+                },
+              });
+            } catch (fallbackErr) {
+              logger.error('Failed to send fallback message or update conversation', {
+                error: (fallbackErr as Error).message,
+              });
+            }
           } finally {
             if (redisClient && lockAcquired) await redisClient.del(lockKey);
           }
