@@ -25,6 +25,12 @@ import leadsRouter from './modules/leads/router';
 import { startSchedulers } from './services/scheduler';
 const app = express();
 app.set('trust proxy', 1);
+
+// DEBUG LOGGING: Log ALL requests as soon as they hit the server
+app.use((req, res, next) => {
+  console.log(`\n[DEBUG-REQ] ${req.method} ${req.url} | Origin: ${req.headers.origin || 'None'}`);
+  next();
+});
 const server = http.createServer(app);
 
 // Allow the configured frontend plus any extra origins (e.g. local dev servers).
@@ -47,7 +53,9 @@ const corsOptions = {
     // the CORS headers — the browser blocks the response client-side. An
     // Error here would propagate to the error handler as a 500, which is
     // misleading for what's actually just a disallowed cross-origin request.
-    callback(null, !origin || allowedOrigins.has(origin));
+    const isAllowed = !origin || allowedOrigins.has(origin);
+    console.log(`[DEBUG-CORS] Checking origin: '${origin}' | Allowed: ${isAllowed}`);
+    callback(null, isAllowed);
   },
   credentials: true,
   // Non-safelisted response headers are hidden from cross-origin fetch() JS
