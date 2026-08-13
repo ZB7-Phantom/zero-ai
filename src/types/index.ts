@@ -14,7 +14,9 @@ export interface AiConversationState {
     name: string; age: number; gender: string;
     complaint: string; symptoms: string;
     appointmentDate: string; appointmentTime: string;
-    mode: 'walkin' | 'appointment' | 'onmyway' | 'queue_check';
+    mode: 'walkin' | 'appointment' | 'onmyway';
+    triedAnything?: string;
+    treatmentOutcome?: string;
   }>;
   history: { role: 'user' | 'model'; content: string }[];
 }
