@@ -98,6 +98,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           continue;
         }
 
+        for (const msg of messages) {
           // Support text and interactive messages
           if (msg.type !== 'text' && msg.type !== 'interactive') continue;
 
