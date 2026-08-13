@@ -4,7 +4,7 @@ import { prisma } from '../../config/database';
 import { logger } from '../../config/logger';
 import { env } from '../../config/env';
 import { io } from '../../app';
-import { sendWhatsAppMessage, markReadAndShowTyping } from '../../services/whatsapp/client';
+import { sendWhatsAppMessage, markReadAndShowTyping, sendWhatsAppInteractiveMenu } from '../../services/whatsapp/client';
 import { processMessage } from '../../services/zero-ai/brain';
 import { AiConversationState } from '../../types';
 import { EscalationReason } from '@prisma/client';
@@ -98,16 +98,31 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           continue;
         }
 
-        for (const msg of messages) {
-          // Only process text messages for now
-          if (msg.type !== 'text' || !msg.text?.body) continue;
+          // Support text and interactive messages
+          if (msg.type !== 'text' && msg.type !== 'interactive') continue;
 
           const patientPhone = msg.from;
-          const messageText = msg.text.body;
+          let messageText = '';
+          let overrideIntent: any = undefined;
+
+          if (msg.type === 'text') {
+            if (!msg.text?.body) continue;
+            messageText = msg.text.body;
+          } else if (msg.type === 'interactive') {
+            if (!msg.interactive?.button_reply?.id) continue;
+            const buttonId = msg.interactive.button_reply.id;
+            messageText = msg.interactive.button_reply.title || buttonId;
+            
+            // Map button IDs directly to intents
+            if (buttonId === 'walkin') overrideIntent = 'WALKIN';
+            else if (buttonId === 'appointment') overrideIntent = 'APPOINTMENT';
+            else if (buttonId === 'onmyway') overrideIntent = 'ON_MY_WAY';
+          }
+
           const metaMessageId = msg.id;
 
           try {
-            await markReadAndShowTyping(phoneNumberId, metaMessageId);
+            await markReadAndShowTyping(phoneNumberId, metaMessageId, clinic.metaAccessToken || undefined);
           } catch (err) {
             // non-fatal, typing indicator failure shouldn't stop processing
           }
@@ -209,7 +224,8 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             !!(currentState.data as any).complaint;
 
           if (isConfirmation) {
-            currentState.state = 'COMPLETE' as any;
+            // We no longer mutate currentState.state here.
+            // We pass isConfirmation as forceComplete to processMessage.
           }
 
           // Assign queue number when intake completes
@@ -235,7 +251,9 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             messageText,
             currentState,
             clinic,
-            queueNumberForConfirmation
+            queueNumberForConfirmation,
+            isConfirmation,
+            overrideIntent
           );
 
           // Append this exchange to history
@@ -397,13 +415,16 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             }
           }
 
-          // Send reply to patient via WhatsApp
-          await sendWhatsAppMessage(
-            phoneNumberId,
-            patientPhone,
-            finalReply,
-            clinic.metaAccessToken || undefined
-          );
+          // Send AI reply back to patient
+          try {
+            if ((result as any).interactiveMenu) {
+              await sendWhatsAppInteractiveMenu(phoneNumberId, patientPhone, result.reply, clinic.metaAccessToken || undefined);
+            } else {
+              await sendWhatsAppMessage(phoneNumberId, patientPhone, finalReply, clinic.metaAccessToken || undefined);
+            }
+          } catch (err) {
+            logger.error('WhatsApp sending failed', { error: (err as Error).message });
+          }
 
           // Emit real-time event to clinic dashboard via Socket.io
           io.to(`clinic:${clinic.id}`).emit('conversation:updated', {

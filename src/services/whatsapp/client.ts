@@ -59,7 +59,62 @@ export async function sendWhatsAppMessage(
       status: err.response?.status,
     });
     
-    // Bubble up so handlers.ts can flag the conversation for review
+// Bubble up so handlers.ts can flag the conversation for review
+    throw err;
+  }
+}
+
+// Sends an interactive button menu via WhatsApp Cloud API
+export async function sendWhatsAppInteractiveMenu(
+  phoneNumberId: string,
+  to: string,
+  text: string,
+  accessToken?: string
+): Promise<void> {
+  let cleanTo = to.replace(/\D/g, '');
+  if (cleanTo.startsWith('0') && cleanTo.length === 11) {
+    cleanTo = '234' + cleanTo.slice(1);
+  }
+
+  const token = (accessToken && accessToken.trim().length > 0) ? accessToken.trim() : env.META_ACCESS_TOKEN;
+
+  logger.info(`Sending WhatsApp interactive menu to ${cleanTo} via phoneId ${phoneNumberId}`);
+
+  try {
+    const res = await axios.post(
+      `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanTo,
+        type: 'interactive',
+        interactive: {
+          type: 'button',
+          body: { text },
+          action: {
+            buttons: [
+              { type: 'reply', reply: { id: 'walkin', title: 'Walk-in' } },
+              { type: 'reply', reply: { id: 'appointment', title: 'Book appointment' } },
+              { type: 'reply', reply: { id: 'onmyway', title: 'On my way' } }
+            ]
+          }
+        }
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    logger.info('WhatsApp interactive menu delivered successfully', {
+      to: cleanTo,
+      messageId: res.data?.messages?.[0]?.id,
+    });
+  } catch (err: any) {
+    const errorData = err.response?.data?.error || err.response?.data || err.message;
+    logger.error(`WhatsApp interactive menu failed: ${typeof errorData === 'object' ? JSON.stringify(errorData) : errorData}`);
     throw err;
   }
 }

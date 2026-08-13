@@ -33,6 +33,7 @@ export interface BrainResult {
   department?: string;
   urgency?: string;
   nextState: string;
+  interactiveMenu?: boolean;
 }
 
 export interface IntakeData {
@@ -42,10 +43,12 @@ export interface IntakeData {
   gender: string;
   complaint: string;
   symptoms: string;
+  triedAnything?: string;
+  treatmentOutcome?: string;
   followUpCount: number;
   appointmentDate: string;
   appointmentTime: string;
-  mode: 'walkin' | 'appointment' | 'onmyway' | 'queue_check';
+  mode: 'walkin' | 'appointment' | 'onmyway';
   confirmed?: boolean;
 }
 
@@ -88,7 +91,6 @@ function classifyIntent(text: string, state: AiConversationState): Intent {
     if (/^[1１]$/.test(text.trim())) return 'WALKIN';
     if (/^[2２]$/.test(text.trim())) return 'APPOINTMENT';
     if (/^[3３]$/.test(text.trim())) return 'ON_MY_WAY';
-    if (/^[4４]$/.test(text.trim())) return 'QUEUE_CHECK';
     if (matchesAny(text, WALKIN_PATTERNS)) return 'WALKIN';
     if (matchesAny(text, APPOINTMENT_PATTERNS)) return 'APPOINTMENT';
     if (matchesAny(text, ON_MY_WAY_PATTERNS)) return 'ON_MY_WAY';
@@ -167,7 +169,6 @@ export function getNextState(
   data: Partial<IntakeData>
 ): string {
   if (intent === 'RESTART') return 'MENU';
-  if (intent === 'QUEUE_CHECK') return currentState;
 
   switch (currentState) {
     case 'START':
@@ -188,7 +189,7 @@ export function getNextState(
 
     case 'COLLECTING_SYMPTOMS': {
       const followUpCount = (data as any).followUpCount || 0;
-      if (data.symptoms && followUpCount >= 1) {
+      if (data.symptoms && followUpCount >= 2) {
         if (data.mode === 'appointment') {
           if (!data.appointmentDate) return 'COLLECTING_APPOINTMENT_DATE';
           if (!data.appointmentTime) return 'COLLECTING_APPOINTMENT_TIME';
@@ -440,14 +441,13 @@ function fallbackReply(
   switch (nextState) {
     case 'AWAITING_CONFIRMATION': {
       if (data.mode === 'walkin') {
-        const { department, urgency } = routeToDepAndUrgency(data);
         const displayComplaint = data.complaint || (data as any).symptoms || 'Not recorded';
-        return `Here is what I have for you, ${firstName}:\n\n*Name:* ${data.name}\n*Age:* ${data.age}\n*Complaint:* ${displayComplaint}\n*Department:* ${department}\n*Urgency:* ${urgency}\n\nIs everything correct? Reply *Yes* to confirm or let me know what needs to be updated.`;
+        return `Here is what I have for you, ${firstName}:\n\n*Name:* ${data.name}\n*Age:* ${data.age}\n*Complaint:* ${displayComplaint}\n\nIs everything correct? Reply *Yes* to confirm or let me know what needs to be updated.`;
       }
       return `Please reply *Yes* to confirm your details or let me know what you want to change.`;
     }
     case 'MENU':
-      return `Hello! Welcome to *${clinic.name}*. I'm *Zero*, your AI clinic assistant. 👋\n\nHow can I help you today?\n\n1️⃣ Walk-in — join today's queue\n2️⃣ Book an appointment\n3️⃣ I'm on my way to the clinic\n4️⃣ Check my queue number`;
+      return `Hello! Welcome to *${clinic.name}*. I'm *Zero*, your AI clinic assistant. 👋\n\nWhat can I help you with today?`;
     case 'COLLECTING_DETAILS':
       if (!data.name) return `What's your *full name*?`;
       if (!data.age) return `Thanks *${firstName}*. How old are you?`;
@@ -497,9 +497,6 @@ function buildInstruction(
 You are all set, *${data.name}*.
 
 *Queue Number:* #${queuePlaceholder}
-*Name:* ${data.name}
-*Date:* ${today}
-*Department:* ${department}
 
 Please take a seat — I will message you the moment it is
 your turn. 🙏
@@ -529,7 +526,7 @@ This is the final message of the intake flow.`;
       return `The patient is responding to the summary you showed them. If they confirmed (yes/correct/ok), tell them warmly that you are registering them now. If they want to correct something, acknowledge what they said and ask for the correct information. Do not show the queue number yet — that happens next.`;
 
     case 'MENU':
-      return `Say hi and show the clinic menu with these exact options:\n1️⃣ Walk-in — join today's queue\n2️⃣ Book an appointment\n3️⃣ I'm on my way to the clinic\n4️⃣ Check my queue number\n\nMention the clinic name *${clinicName}* and your name *Zero* casually.`;
+      return `Say hi and show the clinic menu exactly as follows:\n"Hello! Welcome to *${clinicName}*. I'm *Zero*, your AI clinic assistant. 👋\n\nWhat can I help you with today?"`;
 
     case 'COLLECTING_DETAILS': {
       const missing = [];
@@ -576,10 +573,10 @@ This is the final message of the intake flow.`;
       }
 
       if (followUpCount === 1) {
-        return `Thank the patient briefly. Ask: "Did this start suddenly or has it been building up gradually?" Extract any symptom details from this message.`;
+        return `Ask the patient: "Have you tried anything for this?" Extract what they tried and the outcome if they mention it.`;
       }
 
-      return `The patient has shared good detail. Show genuine
+      return `The patient has shared good detail about what they tried. Show genuine
   warmth — acknowledge what they have been going through
   before asking one final question: are there any other
   symptoms they want to mention before you proceed?
@@ -604,9 +601,6 @@ This is the final message of the intake flow.`;
   }
 }
 
-// Map each state to the field it's actively soliciting —
-// that field is always allowed to be overwritten by this turn's answer,
-// even if already set, because the system itself just asked for it.
 function getActiveField(state: string, data: Partial<IntakeData>): string | null {
   switch (state) {
     case 'COLLECTING_DETAILS':
@@ -614,7 +608,10 @@ function getActiveField(state: string, data: Partial<IntakeData>): string | null
       if (!data.age) return 'age';
       if (!data.gender) return 'gender';
       return 'complaint';
-    case 'COLLECTING_SYMPTOMS': return 'symptoms';
+    case 'COLLECTING_SYMPTOMS': 
+      const followUpCount = (data as any).followUpCount || 0;
+      if (followUpCount === 1) return 'triedAnything'; // When we ask if they tried anything
+      return 'symptoms'; // The first question is always duration/severity
     case 'COLLECTING_APPOINTMENT_DATE': return 'appointmentDate';
     case 'COLLECTING_APPOINTMENT_TIME': return 'appointmentTime';
     case 'AWAITING_CONFIRMATION': return null; // null = allow ANY field to overwrite (patient is correcting)
@@ -628,13 +625,15 @@ export async function processMessage(
   message: string,
   state: AiConversationState,
   clinic: Clinic,
-  queueNumber?: number
+  queueNumber?: number,
+  forceComplete?: boolean,
+  overrideIntent?: Intent
 ): Promise<BrainResult> {
   try {
     const norm = normalise(message);
 
     // Layer 2: Intent
-    const intent = classifyIntent(norm, state);
+    const intent = overrideIntent || classifyIntent(norm, state);
 
     // Layer 3: Escalation — checked before anything else
     const { escalate, reason } = detectEscalation(intent, norm);
@@ -672,8 +671,13 @@ export async function processMessage(
     // Layer 4: Advance state machine with current data
     // (Gemini may extract more data, but we need the next state to build the instruction)
     const tentativeData = { ...state.data, ...modeUpdate };
-    const nextState = getNextState(state.state, intent, tentativeData);
-    const isComplete = nextState === 'COMPLETE';
+    let nextState = getNextState(state.state, intent, tentativeData);
+    let isComplete = nextState === 'COMPLETE';
+
+    if (forceComplete) {
+      nextState = 'COMPLETE';
+      isComplete = true;
+    }
 
     const { department, urgency } = routeToDepAndUrgency(tentativeData);
 
@@ -756,7 +760,7 @@ export async function processMessage(
       }
 
       // Step 3: Calculate the real next state
-      finalNextState = getNextState(state.state, intent, mergedData);
+      finalNextState = forceComplete ? 'COMPLETE' : getNextState(state.state, intent, mergedData);
       finalIsComplete = finalNextState === 'COMPLETE';
 
       // Step 4: Build the instruction for the reply
@@ -787,7 +791,7 @@ export async function processMessage(
       extracted = modeUpdate;
       
       mergedData = { ...tentativeData, ...extracted };
-      finalNextState = getNextState(state.state, intent, mergedData);
+      finalNextState = forceComplete ? 'COMPLETE' : getNextState(state.state, intent, mergedData);
       finalIsComplete = finalNextState === 'COMPLETE';
       reply = fallbackReply(finalNextState, mergedData, clinic);
     }
@@ -809,6 +813,7 @@ export async function processMessage(
       department,
       urgency,
       nextState: finalNextState,
+      interactiveMenu: finalNextState === 'MENU'
     };
 
   } catch (err) {
