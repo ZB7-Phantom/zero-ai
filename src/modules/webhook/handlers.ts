@@ -215,11 +215,11 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           // If waiting for confirmation and patient said yes,
           // force state to COMPLETE so brain generates queue confirmation
           logger.info(`Confirmation check — state: ${currentState.state}, message: "${messageText.trim()}"`);
+          const normalized = messageText.trim().toLowerCase().replace(/[^\w\s]/g, '');
           const isConfirmation =
             (currentState.state === 'AWAITING_CONFIRMATION' ||
              currentState.state === 'COLLECTING_SYMPTOMS') &&
-            /^(yes|yeah|yep|correct|right|confirm|ok|okay|sure|yh|y)$/i
-              .test(messageText.trim()) &&
+            /^(yes|yeah|yep|correct|right|confirm|ok(ay)?|sure|yh|y)\b/.test(normalized) &&
             // Only treat as confirmation if we have all required fields
             !!(currentState.data as any).name &&
             !!(currentState.data as any).complaint;
