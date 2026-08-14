@@ -33,18 +33,19 @@ app.use((req, res, next) => {
 });
 const server = http.createServer(app);
 
+const cleanOrigin = (url: string) => url.trim().replace(/\/+$/, '');
+
 // Allow the configured frontend plus any extra origins (e.g. local dev servers).
 // In non-production, common Vite/CRA localhost ports are allowed automatically
 // so the frontend can be developed against the deployed backend.
-// We also explicitly allow localhost:3000 always so the dashboard can be tested locally against prod.
+// We also explicitly allow localhost ports always so the dashboard can be tested locally against prod.
 const allowedOrigins = new Set([
-  env.FRONTEND_URL,
+  cleanOrigin(env.FRONTEND_URL),
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
   'http://localhost:3000',
   'http://localhost:3001',
-  ...(env.FRONTEND_URLS_EXTRA?.split(',').map((o) => o.trim()).filter(Boolean) ?? []),
-  ...(env.NODE_ENV !== 'production'
-    ? ['http://localhost:5173', 'http://127.0.0.1:5173']
-    : []),
+  ...(env.FRONTEND_URLS_EXTRA?.split(',').map((o) => cleanOrigin(o)).filter(Boolean) ?? []),
 ]);
 
 const corsOptions = {
@@ -53,8 +54,13 @@ const corsOptions = {
     // the CORS headers — the browser blocks the response client-side. An
     // Error here would propagate to the error handler as a 500, which is
     // misleading for what's actually just a disallowed cross-origin request.
-    const isAllowed = !origin || allowedOrigins.has(origin);
-    console.log(`[DEBUG-CORS] Checking origin: '${origin}' | Allowed: ${isAllowed}`);
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    const normalizedOrigin = cleanOrigin(origin);
+    const isAllowed = allowedOrigins.has(normalizedOrigin);
+    console.log(`[DEBUG-CORS] Checking origin: '${origin}' (normalized: '${normalizedOrigin}') | Allowed: ${isAllowed}`);
     callback(null, isAllowed);
   },
   credentials: true,
