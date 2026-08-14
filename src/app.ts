@@ -59,7 +59,12 @@ const corsOptions = {
       return;
     }
     const normalizedOrigin = cleanOrigin(origin);
-    const isAllowed = allowedOrigins.has(normalizedOrigin);
+    let isAllowed = allowedOrigins.has(normalizedOrigin);
+    if (!isAllowed) {
+      if (normalizedOrigin.endsWith('.vercel.app') || normalizedOrigin.endsWith('use-zero.dev')) {
+        isAllowed = true;
+      }
+    }
     console.log(`[DEBUG-CORS] Checking origin: '${origin}' (normalized: '${normalizedOrigin}') | Allowed: ${isAllowed}`);
     callback(null, isAllowed);
   },
