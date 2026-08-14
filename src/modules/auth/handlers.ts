@@ -54,6 +54,7 @@ export async function register(req: Request, res: Response, next: NextFunction) 
     // to wait on it to get their token back. sendEmail() already catches
     // and logs its own errors internally, so this never throws.
     const verifyUrl = `${env.FRONTEND_URL}/verify-email?token=${verifyToken}`;
+    console.log(`[VERIFY-EMAIL] Verification URL: ${verifyUrl}`);
     sendEmail({
       to: email,
       subject: `Verify your Zero Clinic OS account`,
@@ -66,7 +67,7 @@ export async function register(req: Request, res: Response, next: NextFunction) 
       { expiresIn: env.JWT_EXPIRES_IN as any }
     );
 
-    res.status(201).json({ token, staff: { id: staff.id, fullName, email, role: staff.role }, clinic: { id: clinic.id, name: clinic.name } });
+    res.status(201).json({ token, staff: { id: staff.id, fullName, email, role: staff.role }, clinic: { id: clinic.id, name: clinic.name }, _devVerifyToken: verifyToken });
   } catch (err) { next(err); }
 }
 
@@ -168,13 +169,14 @@ export async function resendVerification(
     });
 
     const verifyUrl = `${env.FRONTEND_URL}/verify-email?token=${verifyToken}`;
+    console.log(`[VERIFY-EMAIL-RESEND] Verification URL: ${verifyUrl}`);
     sendEmail({
       to: email,
       subject: 'Verify your Zero Clinic OS account',
       text: `Please verify your email:\n\n${verifyUrl}\n\nThis link expires in 24 hours.\n\n— Zero Clinic OS`,
     });
 
-    res.json({ success: true });
+    res.json({ success: true, _devVerifyToken: verifyToken });
   } catch (err) { next(err); }
 }
 
@@ -206,13 +208,14 @@ export async function forgotPassword(
     });
 
     const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+    console.log(`[RESET-PASSWORD] Reset URL: ${resetUrl}`);
     sendEmail({
       to: email,
       subject: 'Reset your Zero Clinic OS password',
       text: `Hi ${staff.fullName},\n\nWe received a request to reset your password.\n\nClick the link below to set a new password:\n\n${resetUrl}\n\nThis link expires in 1 hour. If you did not request this, you can safely ignore this email.\n\n— Zero Clinic OS`,
     });
 
-    res.json({ success: true });
+    res.json({ success: true, _devResetToken: resetToken });
   } catch (err) { next(err); }
 }
 
