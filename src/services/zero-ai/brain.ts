@@ -189,7 +189,7 @@ export function getNextState(
 
     case 'COLLECTING_SYMPTOMS': {
       const followUpCount = (data as any).followUpCount || 0;
-      if (data.symptoms && followUpCount >= 2) {
+      if (data.symptoms && followUpCount >= 3) {
         if (data.mode === 'appointment') {
           if (!data.appointmentDate) return 'COLLECTING_APPOINTMENT_DATE';
           if (!data.appointmentTime) return 'COLLECTING_APPOINTMENT_TIME';
@@ -555,7 +555,7 @@ This is the final message of the intake flow.`;
       const complaint = (data.complaint || '').toLowerCase();
 
       if (followUpCount === 0 || !data.symptoms) {
-        let medicalFollowUp = `How long have you had this and how severe is it on a scale of 1 to 10?`;
+        let medicalFollowUp = `How long have you had this?`;
         if (/\b(chest|heart|cardiac)\b/.test(complaint)) {
           medicalFollowUp = `Is the pain sharp, crushing, or pressure-like? Does it spread to your arm or jaw?`;
         } else if (/\b(cough|breath|respiratory)\b/.test(complaint)) {
@@ -573,7 +573,7 @@ This is the final message of the intake flow.`;
       }
 
       if (followUpCount === 1) {
-        return `Ask the patient: "Have you tried anything for this?" Extract what they tried and the outcome if they mention it.`;
+        return `Show genuine empathy for what they just shared — whether they tried something or nothing at all, acknowledge it warmly before asking: "Have you tried anything for this?" Extract what they tried and the outcome if they mention it.`;
       }
 
       return `The patient has shared good detail about what they tried. Show genuine
