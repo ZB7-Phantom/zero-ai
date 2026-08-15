@@ -95,7 +95,7 @@ export async function sendWhatsAppInteractiveMenu(
             buttons: [
               { type: 'reply', reply: { id: 'walkin', title: 'Walk-in' } },
               { type: 'reply', reply: { id: 'appointment', title: 'Book appointment' } },
-              { type: 'reply', reply: { id: 'onmyway', title: 'On my way' } }
+              { type: 'reply', reply: { id: 'enquiries', title: 'Enquiries' } }
             ]
           }
         }

@@ -117,7 +117,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             // Map button IDs directly to intents
             if (buttonId === 'walkin') overrideIntent = 'WALKIN';
             else if (buttonId === 'appointment') overrideIntent = 'APPOINTMENT';
-            else if (buttonId === 'onmyway') overrideIntent = 'ON_MY_WAY';
+            else if (buttonId === 'enquiries') overrideIntent = 'ENQUIRIES';
           }
 
           const metaMessageId = msg.id;

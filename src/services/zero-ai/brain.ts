@@ -24,6 +24,28 @@ const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY!);
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
+function getLagosNow() {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Lagos', weekday: 'long', year: 'numeric',
+    month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true,
+  }).formatToParts(now);
+  const get = (t: string) => parts.find(p => p.type === t)?.value || '';
+  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const dayOfWeek = dayNames.indexOf(get('weekday'));
+  return {
+    formatted: `${get('weekday')}, ${get('day')} ${get('month')} ${get('year')}, ${get('hour')}:${get('minute')}`,
+    dayOfWeek,
+    hhmm: `${get('hour')}:${get('minute')}`,
+  };
+}
+
+function isClinicOpenNow(clinic: Clinic): boolean {
+  const { dayOfWeek, hhmm } = getLagosNow();
+  if (!clinic.openDays.includes(dayOfWeek)) return false;
+  return hhmm >= clinic.opensAt && hhmm < clinic.closesAt;
+}
+
 export interface BrainResult {
   reply: string;
   extracted: Partial<IntakeData>;
@@ -62,6 +84,7 @@ type Intent =
   | 'CANCEL'
   | 'RESTART'
   | 'ESCALATION_TRIGGER'
+  | 'ENQUIRIES'
   | 'UNKNOWN';
 
 // ─── LAYER 1: NORMALISER ──────────────────────────────────────────────────────
@@ -87,13 +110,14 @@ function classifyIntent(text: string, state: AiConversationState): Intent {
   if (matchesAny(text, QUEUE_CHECK_PATTERNS)) return 'QUEUE_CHECK';
 
   // Number selections — handle before anything else at menu states
-  if (['START', 'MENU', 'IDLE'].includes(state.state)) {
+  if (['START', 'MENU', 'IDLE', 'ENQUIRY_CTA'].includes(state.state)) {
     if (/^[1１]$/.test(text.trim())) return 'WALKIN';
     if (/^[2２]$/.test(text.trim())) return 'APPOINTMENT';
-    if (/^[3３]$/.test(text.trim())) return 'ON_MY_WAY';
+    if (/^[3３]$/.test(text.trim())) return 'ENQUIRIES';
     if (matchesAny(text, WALKIN_PATTERNS)) return 'WALKIN';
     if (matchesAny(text, APPOINTMENT_PATTERNS)) return 'APPOINTMENT';
     if (matchesAny(text, ON_MY_WAY_PATTERNS)) return 'ON_MY_WAY';
+    if (matchesAny(text, ENQUIRIES_PATTERNS)) return 'ENQUIRIES';
     if (matchesAny(text, GREETING_PATTERNS)) return 'GREETING';
   }
 
@@ -129,6 +153,9 @@ const ON_MY_WAY_PATTERNS = [
 ];
 const QUEUE_CHECK_PATTERNS = [
   /\b(queue|my (number|turn|position)|how long|when.*my turn)\b/,
+];
+const ENQUIRIES_PATTERNS = [
+  /\b(enquir|inquir|question|just asking|wanted to ask|do you (have|offer)|what (time|are your)|how much|price|cost|opening hours|are you open)\b/,
 ];
 const RESTART_PATTERNS = [/^(restart|start over|reset|menu|main menu)[\s.]*$/];
 const CANCEL_PATTERNS = [/\b(cancel|never mind|forget it|stop)\b/];
@@ -286,6 +313,11 @@ async function callGemini(
   and Pixar. You communicate via WhatsApp, so your texts should be concise, modern,
   and surprisingly human.
 
+  CLINIC INFO:
+  - Services: ${clinic.services.length ? clinic.services.join(', ') : 'Not listed yet'}
+  - Hours: ${clinic.opensAt}–${clinic.closesAt}, on the days the clinic operates
+  - Right now it is ${getLagosNow().formatted} (Nigeria time). The clinic is currently ${isClinicOpenNow(clinic) ? 'OPEN' : 'CLOSED'}.
+
   YOUR PERSONALITY:
   - Warm but highly efficient. You genuinely care, but you speak like a smart human peer, not a robot.
   - Fluid and casual: always use contractions ("I'm", "you're", "that's", "let's", "here's"). Never use stiff, formal phrasing like "It is", "I am", or "Could you please".
@@ -326,7 +358,8 @@ async function callGemini(
     "extracted": {
       "name": null, "age": null, "gender": null,
       "complaint": null, "symptoms": null,
-      "appointmentDate": null, "appointmentTime": null
+      "appointmentDate": null, "appointmentTime": null,
+      "enquiryDone": false, "enquiryUnresolved": false
     }
   }`;
 
@@ -462,6 +495,10 @@ function fallbackReply(
     case 'IDLE':
       return `You are all set, ${firstName}. Please take a
     seat and we will call you when it is your turn. 🙏`;
+    case 'ANSWERING_ENQUIRIES': 
+      return `Sorry, could you ask that again?`;
+    case 'ENQUIRY_CTA': 
+      return `Would you like to book an appointment, or call us at ${clinic.phoneNumber || 'the clinic'}?`;
     default:
       return `Could you say that again? I want to make sure I help you correctly.`;
   }
@@ -506,7 +543,7 @@ Do not say you are processing or submitting anything.
 This is the final message of the intake flow.`;
     }
     if (mode === 'appointment') {
-      return `Appointment booked. Confirm with this format:\n✅ *Appointment request submitted, ${data.name}.*\n\n📅 Date: *${data.appointmentDate}*\n⏰ Time: *${data.appointmentTime}*\n🏥 Service: *${data.complaint}*\n\nThe clinic will confirm shortly. 🙏\n\nDo not add or change anything.`;
+      return `Resolve any relative date/time language ("tomorrow", "morning") into an actual specific date and time using today's date from CLINIC INFO. Confirm with:\n✅ *Appointment request submitted, ${data.name}.*\n\n📅 Date: *[resolved actual date]*\n⏰ Time: *[resolved actual time]*\n🏥 Service: *${data.complaint}*\n\nThe clinic will confirm shortly. 🙏`;
     }
     return `Patient is on their way. Send a warm confirmation that ${clinicName} has been notified and you'll see them soon.`;
   }
@@ -595,6 +632,12 @@ This is the final message of the intake flow.`;
     follow-up messages. Respond warmly and briefly —
     let them know they are all set and to take a seat.
     Do not restart the intake flow. Do not show the menu.`;
+
+    case 'ANSWERING_ENQUIRIES':
+      return `Answer ONLY using CLINIC INFO above — never invent details. If it's medical/diagnostic, don't diagnose — suggest booking or coming in. If you can't confidently answer from CLINIC INFO, say so politely ("Let me confirm that for you") and set "enquiryUnresolved": true. If the patient signals no more questions, acknowledge warmly and set "enquiryDone": true.`;
+
+    case 'ENQUIRY_CTA':
+      return `They're done asking questions. In one warm line, ask if they'd like to book an appointment or call the clinic at ${clinic.phoneNumber || 'our number'}.`;
 
     default:
       return `Respond helpfully to the patient's message.`;
@@ -771,18 +814,36 @@ export async function processMessage(
       );
 
       // Step 5: Call Gemini again just for the reply
-      const { reply: geminiReply } = await callGemini(
+      const { reply: geminiReply, extracted: pass2Flags } = await callGemini(
         message, state.history, instruction, clinic
       );
 
-      if (validateGeminiReply(geminiReply, finalNextState, finalIsComplete)) {
-        reply = geminiReply;
+      if (finalNextState === 'ANSWERING_ENQUIRIES') {
+        if ((pass2Flags as any)?.enquiryUnresolved) {
+          return {
+            reply: geminiReply, extracted: {}, isComplete: false,
+            escalate: true, escalationReason: 'OUT_OF_SCOPE',
+            urgency: 'LOW', department: 'General', nextState: 'ANSWERING_ENQUIRIES',
+          };
+        }
+        if ((pass2Flags as any)?.enquiryDone) {
+          finalNextState = 'ENQUIRY_CTA';
+          const ctaInstruction = buildInstruction('ENQUIRY_CTA', mergedData, clinic, false);
+          const { reply: ctaReply } = await callGemini(message, state.history, ctaInstruction, clinic);
+          reply = validateGeminiReply(ctaReply, 'ENQUIRY_CTA', false) ? ctaReply : fallbackReply('ENQUIRY_CTA', mergedData, clinic);
+        } else {
+          reply = validateGeminiReply(geminiReply, finalNextState, finalIsComplete) ? geminiReply : fallbackReply(finalNextState, mergedData, clinic);
+        }
       } else {
-        logger.warn('Gemini reply failed validation — using fallback', {
-          reply: geminiReply.slice(0, 80),
-          nextState: finalNextState,
-        });
-        reply = fallbackReply(finalNextState, mergedData, clinic);
+        if (validateGeminiReply(geminiReply, finalNextState, finalIsComplete)) {
+          reply = geminiReply;
+        } else {
+          logger.warn('Gemini reply failed validation — using fallback', {
+            reply: geminiReply.slice(0, 80),
+            nextState: finalNextState,
+          });
+          reply = fallbackReply(finalNextState, mergedData, clinic);
+        }
       }
 
     } catch (geminiErr) {
