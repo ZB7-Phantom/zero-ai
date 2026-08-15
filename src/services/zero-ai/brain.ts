@@ -517,7 +517,8 @@ function buildInstruction(
   data: Partial<IntakeData>,
   clinic: Clinic,
   isComplete: boolean,
-  queuePlaceholder?: number
+  queuePlaceholder?: number,
+  knownPatient?: any
 ): string {
   const firstName = (data as any).firstName || data.name || 'the patient';
   const clinicName = clinic.name;
@@ -564,6 +565,13 @@ This is the final message of the intake flow.`;
       return `The patient is responding to the summary you showed them. If they confirmed (yes/correct/ok), tell them warmly that you are registering them now. If they want to correct something, acknowledge what they said and ask for the correct information. Do not show the queue number yet — that happens next.`;
 
     case 'MENU':
+      if (knownPatient?.name) {
+        const firstNm = knownPatient.name.split(' ')[0];
+        const followUp = knownPatient.complaint
+          ? ` Last time you came in about ${knownPatient.complaint.toLowerCase()} — is this about that again, or something new today?`
+          : ``;
+        return `Greet ${firstNm} warmly as a returning patient — do NOT introduce yourself or explain what Zero is, they already know you. Something like: "Hey ${firstNm}, good to see you again!${followUp}" Vary the phrasing naturally each time, don't repeat this exact wording.`;
+      }
       return `Say hi and show the clinic menu exactly as follows:\n"Hello! Welcome to *${clinicName}*. I'm *Zero*, your AI clinic assistant. 👋\n\nWhat can I help you with today?"`;
 
     case 'COLLECTING_DETAILS': {
@@ -671,7 +679,8 @@ export async function processMessage(
   clinic: Clinic,
   queueNumber?: number,
   forceComplete?: boolean,
-  overrideIntent?: Intent
+  overrideIntent?: Intent,
+  knownPatient?: any
 ): Promise<BrainResult> {
   try {
     const norm = normalise(message);
@@ -811,7 +820,7 @@ export async function processMessage(
       // using mergedData so it knows what's already collected
       const instruction = buildInstruction(
         finalNextState, mergedData, clinic,
-        finalIsComplete, queueNumber
+        finalIsComplete, queueNumber, knownPatient
       );
 
       // Step 5: Call Gemini again just for the reply

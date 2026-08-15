@@ -201,13 +201,22 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           const lastActivity = conversation.lastMessageAt;
           const sessionExpired = lastActivity && lastActivity < twoHoursAgo;
 
+          let knownPatientForFlow: any = undefined;
+
           // Reset if the last session was idle, or if
           // the conversation has been inactive for over 2 hours
           if (
             currentState.state === 'IDLE' ||
             sessionExpired
           ) {
-            currentState.data = {};
+            const knownPatient = await prisma.patient.findUnique({
+              where: { clinicId_phone: { clinicId: clinic.id, phone: patientPhone } },
+            });
+            knownPatientForFlow = knownPatient;
+
+            currentState.data = knownPatient
+              ? { name: knownPatient.name || undefined, age: knownPatient.age || undefined, gender: knownPatient.gender || undefined }
+              : {};
             currentState.history = [];
             currentState.state = 'START';
           }
@@ -256,7 +265,8 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
             clinic,
             queueNumberForConfirmation,
             isConfirmation,
-            overrideIntent
+            overrideIntent,
+            knownPatientForFlow
           );
 
           // Append this exchange to history
