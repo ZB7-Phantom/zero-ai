@@ -216,10 +216,12 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           // force state to COMPLETE so brain generates queue confirmation
           logger.info(`Confirmation check — state: ${currentState.state}, message: "${messageText.trim()}"`);
           const normalized = messageText.trim().toLowerCase().replace(/[^\w\s]/g, '');
+          const isShortConfirmation =
+            normalized.split(/\s+/).length <= 4 &&
+            /^(yes|yeah|yep|correct|right|confirm|ok(ay)?|sure|yh|y)\b/.test(normalized);
           const isConfirmation =
-            (currentState.state === 'AWAITING_CONFIRMATION' ||
-             currentState.state === 'COLLECTING_SYMPTOMS') &&
-            /^(yes|yeah|yep|correct|right|confirm|ok(ay)?|sure|yh|y)\b/.test(normalized) &&
+            currentState.state === 'AWAITING_CONFIRMATION' &&
+            isShortConfirmation &&
             // Only treat as confirmation if we have all required fields
             !!(currentState.data as any).name &&
             !!(currentState.data as any).complaint;
