@@ -207,7 +207,16 @@ export function getNextState(
       if (['WALKIN', 'APPOINTMENT', 'ON_MY_WAY'].includes(intent)) {
         return 'COLLECTING_DETAILS';
       }
+      if (intent === 'ENQUIRIES') {
+        return 'ANSWERING_ENQUIRIES';
+      }
       return 'MENU';
+
+    case 'ANSWERING_ENQUIRIES':
+      return currentState; // stays put — only advances via the enquiryDone/enquiryUnresolved flags already wired in processMessage
+
+    case 'ENQUIRY_CTA':
+      return intent === 'APPOINTMENT' ? 'COLLECTING_DETAILS' : 'IDLE';
 
     case 'COLLECTING_DETAILS':
       if (data.name && data.age && data.gender && data.complaint) {
