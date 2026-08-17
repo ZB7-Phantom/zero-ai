@@ -5,6 +5,7 @@ import { AppError } from '../../middleware/errorHandler';
 import { AuthenticatedRequest } from '../../types';
 import { io } from '../../app';
 import { sendWhatsAppMessage } from '../../services/whatsapp/client';
+import { createNotification } from '../../services/notifications/create';
 
 // GET /api/conversations?status=NEEDS_REVIEW
 // Powers the three sidebar tabs in ZeroChat. Returns conversation
