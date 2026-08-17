@@ -7,6 +7,7 @@ import {
   takeOver,
   reply,
   resolve,
+  flagConversation,
 } from './handlers';
 
 const router = Router();
@@ -17,5 +18,6 @@ router.get('/:id', authenticate as any, getConversation as any);
 router.post('/:id/take-over', authenticate as any, takeOver as any);
 router.post('/:id/reply', authenticate as any, reply as any);
 router.post('/:id/resolve', authenticate as any, resolve as any);
+router.post('/:id/flag', authenticate as any, flagConversation as any);
 
 export default router;

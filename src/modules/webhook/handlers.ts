@@ -322,6 +322,7 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
               data: {
                 aiState: newState as any,
                 status: conversationStatus,
+                isAiPaused: result.escalate,
                 escalationReason: result.escalate
                   ? (result.escalationReason as EscalationReason)
                   : undefined,
@@ -449,50 +450,39 @@ export async function receive(req: Request, res: Response, next: NextFunction): 
           });
 
           if (result.escalate) {
-            const queueNumber = await assignQueueNumber(clinic.id);
-            await prisma.patient.upsert({
-              where: { clinicId_phone: { clinicId: clinic.id, phone: patientPhone } },
-              create: {
-                clinicId: clinic.id,
-                phone: patientPhone,
-                name: (currentState.data as any).name || patientPhone,
-                complaint: (currentState.data as any).complaint || 'Escalated',
-                queueNumber,
-                patientType: 'WALK_IN',
-                status: 'WAITING',
-                arrivalTime: new Date(),
-              },
-              update: {
-                name: (currentState.data as any).name || patientPhone,
-                complaint: (currentState.data as any).complaint || 'Escalated',
-                queueNumber,
-                status: 'WAITING',
-                arrivalTime: new Date(),
-              },
-            });
+            const isPresent = (currentState.data as any).mode === 'walkin';
+
+            if (isPresent) {
+              const queueNumber = await assignQueueNumber(clinic.id);
+              await prisma.patient.upsert({
+                where: { clinicId_phone: { clinicId: clinic.id, phone: patientPhone } },
+                create: {
+                  clinicId: clinic.id, phone: patientPhone,
+                  name: (currentState.data as any).name || patientPhone,
+                  complaint: (currentState.data as any).complaint || 'Escalated',
+                  queueNumber, patientType: 'WALK_IN', status: 'WAITING', arrivalTime: new Date(),
+                },
+                update: {
+                  name: (currentState.data as any).name || patientPhone,
+                  complaint: (currentState.data as any).complaint || 'Escalated',
+                  queueNumber, status: 'WAITING', arrivalTime: new Date(),
+                },
+              });
+            }
 
             io.to(`clinic:${clinic.id}`).emit('conversation:escalated', {
-              conversationId: conversation.id,
-              patientPhone,
-              reason: result.escalationReason,
+              conversationId: conversation.id, patientPhone, reason: result.escalationReason,
             });
 
             await createNotification({
-              clinicId: clinic.id,
-              type: 'escalation',
+              clinicId: clinic.id, type: 'escalation',
               title: escalationTitle(result.escalationReason),
               body: `Patient ${patientPhone} — ${result.escalationReason?.replace('_', ' ').toLowerCase()}. Click Review to take over.`,
-              metadata: {
-                conversationId: conversation.id,
-                patientPhone,
-                reason: result.escalationReason,
-              },
+              metadata: { conversationId: conversation.id, patientPhone, reason: result.escalationReason },
             });
 
             logger.warn('Conversation escalated', {
-              clinicId: clinic.id,
-              conversationId: conversation.id,
-              reason: result.escalationReason,
+              clinicId: clinic.id, conversationId: conversation.id, reason: result.escalationReason,
             });
           }
           } catch (innerErr) {

@@ -706,7 +706,6 @@ export async function processMessage(
     // Layer 3: Escalation — checked before anything else
     const { escalate, reason } = detectEscalation(intent, norm);
     if (escalate) {
-      // Still try to extract a name from the message for the patient record
       let escalationExtracted: Partial<IntakeData> = {};
       try {
         const { extracted } = await callGemini(
@@ -718,13 +717,33 @@ export async function processMessage(
         escalationExtracted = extracted;
       } catch { /* silent — escalation reply doesn't need extraction */ }
 
+      const clinicOpen = isClinicOpenNow(clinic);
+      const isPresent = state.data.mode === 'walkin'; // physically at the clinic
+
+      let reply: string;
+
+      if (reason === 'URGENT_MEDICAL') {
+        // Genuine medical urgency — never defer this to "when we reopen",
+        // regardless of hours. If clinic is closed, direct them to real emergency care.
+        reply = clinicOpen
+          ? `⚠️ *This sounds urgent.* I'm flagging this to our team right now — someone will be with you *immediately*. Please stay on this chat. 🙏`
+          : `⚠️ *This sounds urgent* and we're currently closed. Please contact emergency services or go to the nearest emergency room right away — don't wait on us for this. I'm still flagging this conversation for our team to follow up.`;
+      } else if (isPresent) {
+        // Already physically at the clinic — staff can be grabbed directly
+        reply = `Got it — I'm letting our staff know right now so someone can come speak with you directly. 🙏`;
+      } else if (clinicOpen) {
+        reply = `I understand. I'm handing this over to our team now — a member of staff will take it from here shortly. 🙏`;
+      } else {
+        reply = `I understand, and I'm sorry I couldn't fully help. We're currently closed — a member of our team will get back to you as soon as we reopen. 🙏`;
+      }
+
       return {
-        reply: `⚠️ *This sounds urgent.* I'm flagging this conversation to our team right now.\n\nSomeone will be with you *immediately*. Please stay on this chat. 🙏`,
+        reply,
         extracted: escalationExtracted,
         isComplete: false,
         escalate: true,
         escalationReason: reason,
-        urgency: 'HIGH',
+        urgency: reason === 'URGENT_MEDICAL' ? 'HIGH' : 'LOW',
         department: 'General',
         nextState: state.state,
       };
@@ -845,8 +864,12 @@ export async function processMessage(
 
       if (finalNextState === 'ANSWERING_ENQUIRIES') {
         if ((pass2Flags as any)?.enquiryUnresolved) {
+          const clinicOpen = isClinicOpenNow(clinic);
+          const reply = clinicOpen
+            ? `Let me confirm that for you and get right back to you — I'm flagging this for our team now. 🙏`
+            : `Let me confirm that for you. We're closed right now, so I'll flag this and our team will follow up as soon as we reopen. 🙏`;
           return {
-            reply: geminiReply, extracted: {}, isComplete: false,
+            reply, extracted: {}, isComplete: false,
             escalate: true, escalationReason: 'OUT_OF_SCOPE',
             urgency: 'LOW', department: 'General', nextState: 'ANSWERING_ENQUIRIES',
           };

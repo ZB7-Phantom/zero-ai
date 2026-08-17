@@ -252,3 +252,46 @@ export async function resolve(
     next(err);
   }
 }
+
+// POST /api/conversations/:id/flag
+// Staff manually flags a conversation based on an in-person complaint —
+// keeps it in the same NEEDS_REVIEW/escalation pipeline as AI-detected ones.
+export async function flagConversation(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: req.params.id as string, clinicId: req.clinic.id },
+    });
+    if (!conversation) throw new AppError(404, 'Conversation not found', 'NOT_FOUND');
+
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { isAiPaused: true, status: 'NEEDS_REVIEW', escalationReason: 'MANUAL' },
+    });
+
+    await prisma.conversationMessage.create({
+      data: {
+        conversationId: conversation.id,
+        role: 'system',
+        content: `Flagged by ${req.staff.fullName} — in-person complaint`,
+      },
+    });
+
+    await createNotification({
+      clinicId: req.clinic.id,
+      type: 'escalation',
+      title: 'Staff-flagged conversation',
+      body: `${req.staff.fullName} flagged this conversation from an in-person complaint.`,
+      metadata: { conversationId: conversation.id, patientPhone: conversation.patientPhone, reason: 'MANUAL' },
+    });
+
+    io.to(`clinic:${req.clinic.id}`).emit('conversation:escalated', {
+      conversationId: conversation.id, patientPhone: conversation.patientPhone, reason: 'MANUAL',
+    });
+
+    res.json({ success: true });
+  } catch (err) { next(err); }
+}
