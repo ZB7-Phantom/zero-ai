@@ -110,7 +110,7 @@ function classifyIntent(text: string, state: AiConversationState): Intent {
   if (matchesAny(text, QUEUE_CHECK_PATTERNS)) return 'QUEUE_CHECK';
 
   // Number selections — handle before anything else at menu states
-  if (['START', 'MENU', 'IDLE', 'ENQUIRY_CTA'].includes(state.state)) {
+  if (['START', 'MENU', 'IDLE', 'ENQUIRY_CTA', 'ANSWERING_ENQUIRIES'].includes(state.state)) {
     if (/^[1１]$/.test(text.trim())) return 'WALKIN';
     if (/^[2２]$/.test(text.trim())) return 'APPOINTMENT';
     if (/^[3３]$/.test(text.trim())) return 'ENQUIRIES';
@@ -213,6 +213,9 @@ export function getNextState(
       return 'MENU';
 
     case 'ANSWERING_ENQUIRIES':
+      if (intent === 'WALKIN' || intent === 'APPOINTMENT') {
+        return 'COLLECTING_DETAILS';
+      }
       return currentState; // stays put — only advances via the enquiryDone/enquiryUnresolved flags already wired in processMessage
 
     case 'ENQUIRY_CTA':
@@ -226,7 +229,7 @@ export function getNextState(
 
     case 'COLLECTING_SYMPTOMS': {
       const followUpCount = (data as any).followUpCount || 0;
-      if (data.symptoms && followUpCount >= 3) {
+      if ((data as any).isServiceRequest || (data.symptoms && followUpCount >= 3)) {
         if (data.mode === 'appointment') {
           if (!data.appointmentDate) return 'COLLECTING_APPOINTMENT_DATE';
           if (!data.appointmentTime) return 'COLLECTING_APPOINTMENT_TIME';
@@ -369,7 +372,8 @@ async function callGemini(
       "name": null, "age": null, "gender": null,
       "complaint": null, "symptoms": null,
       "appointmentDate": null, "appointmentTime": null,
-      "enquiryDone": false, "enquiryUnresolved": false
+      "enquiryDone": false, "enquiryUnresolved": false,
+      "isServiceRequest": false
     }
   }`;
 
@@ -602,7 +606,7 @@ This is the final message of the intake flow.`;
       if (!data.gender) {
         return `Ask for gender naturally. Extract it from this message.`;
       }
-      return `Ask what brings ${(data as any).firstName || 'them'} to ${clinic.name} today. Extract their complaint.`;
+      return `Ask what brings ${(data as any).firstName || 'them'} to ${clinic.name} today. Extract their complaint. If this is clearly a straightforward service request (teeth whitening, a specific consultation, a check-up) rather than a symptom, set isServiceRequest: true and don't ask about duration, severity, or what they've tried — just confirm briefly.`;
     }
 
     case 'COLLECTING_SYMPTOMS': {
@@ -652,7 +656,9 @@ This is the final message of the intake flow.`;
     Do not restart the intake flow. Do not show the menu.`;
 
     case 'ANSWERING_ENQUIRIES':
-      return `Answer ONLY using CLINIC INFO above — never invent details. If it's medical/diagnostic, don't diagnose — suggest booking or coming in. If you can't confidently answer from CLINIC INFO, say so politely ("Let me confirm that for you") and set "enquiryUnresolved": true. If the patient signals no more questions, acknowledge warmly and set "enquiryDone": true.`;
+      return `Answer ONLY using CLINIC INFO above — never invent details. If it's medical/diagnostic, don't diagnose — suggest booking or coming in. If you can't confidently answer from CLINIC INFO, say so politely ("Let me confirm that for you") and set "enquiryUnresolved": true. If the patient signals no more questions, acknowledge warmly and set "enquiryDone": true.
+      
+You must NEVER say an appointment or walk-in is booked, confirmed, or "locked in" while answering enquiries — you have no ability to save anything here. If they want to book, say you'll get that started right away and let the real booking flow take over.`;
 
     case 'ENQUIRY_CTA':
       return `They're done asking questions. In one warm line, ask if they'd like to book an appointment or call the clinic at ${clinic.phoneNumber || 'our number'}.`;
