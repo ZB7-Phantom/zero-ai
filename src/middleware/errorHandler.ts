@@ -9,7 +9,7 @@ export class AppError extends Error {
 }
 
 export function errorHandler(err: Error, req: Request, res: Response, _next: NextFunction): void {
-  logger.error('Unhandled error', { error: err.message, path: req.path, method: req.method });
+  logger.error('Unhandled error', { error: err.message, stack: err.stack, path: req.path, method: req.method });
 
   if (err instanceof ZodError) {
     res.status(400).json({ error: 'Validation failed', code: 'VALIDATION_ERROR', details: err.flatten().fieldErrors });
