@@ -9,6 +9,13 @@ export class AppError extends Error {
 }
 
 export function errorHandler(err: Error, req: Request, res: Response, _next: NextFunction): void {
+  // Use console.error directly to ensure the raw stack trace is never dropped or 
+  // swallowed by Winston's JSON stringifier or formatters.
+  console.error('\n--- UNHANDLED ERROR FATAL TRACE ---');
+  console.error(`Path: ${req.method} ${req.path}`);
+  console.error(err);
+  console.error('-----------------------------------\n');
+  
   logger.error('Unhandled error', { error: err.message, stack: err.stack, path: req.path, method: req.method });
 
   if (err instanceof ZodError) {
