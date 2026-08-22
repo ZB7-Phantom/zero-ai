@@ -11,7 +11,13 @@ const devFormat = winston.format.combine(
 
 export const logger = winston.createLogger({
   level: env.NODE_ENV === 'development' ? 'debug' : 'info',
-  format: env.NODE_ENV === 'development' ? devFormat : winston.format.combine(winston.format.timestamp(), winston.format.json()),
+  format: env.NODE_ENV === 'development'
+    ? devFormat
+    : winston.format.combine(
+        winston.format.errors({ stack: true }),
+        winston.format.timestamp(),
+        winston.format.json()
+      ),
   transports: [new winston.transports.Console()],
   exceptionHandlers: [new winston.transports.Console()],
   rejectionHandlers: [new winston.transports.Console()],
