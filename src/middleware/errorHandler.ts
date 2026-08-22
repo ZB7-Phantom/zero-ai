@@ -5,6 +5,8 @@ import { logger } from '../config/logger';
 export class AppError extends Error {
   constructor(public statusCode: number, message: string, public code?: string) {
     super(message);
+    Object.setPrototypeOf(this, AppError.prototype);
+    this.name = 'AppError';
   }
 }
 
@@ -22,9 +24,13 @@ export function errorHandler(err: Error, req: Request, res: Response, _next: Nex
     res.status(400).json({ error: 'Validation failed', code: 'VALIDATION_ERROR', details: err.flatten().fieldErrors });
     return;
   }
-  if (err instanceof AppError) {
-    res.status(err.statusCode).json({ error: err.message, code: err.code });
+  
+  // Fallback property check in case of circular dependency or TS prototype stripping
+  if (err instanceof AppError || ('statusCode' in err && 'code' in err)) {
+    const status = (err as any).statusCode || 400;
+    res.status(status).json({ error: err.message, code: (err as any).code });
     return;
   }
+  
   res.status(500).json({ error: 'An unexpected error occurred', code: 'INTERNAL_ERROR' });
 }
